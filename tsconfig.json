@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "dist",
+
+		// NodeNext requires module and moduleResolution to match.
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"target": "ES2023",
+		"lib": ["ES2023"],
+
+		// Import local files with .ts in source; tsc rewrites them to .js in dist.
+		"allowImportingTsExtensions": true,
+		"rewriteRelativeImportExtensions": true,
+
+		"strict": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+
+		"sourceMap": true
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

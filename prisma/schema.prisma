@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["identity"]
+}
+
+enum UserType {
+  CUSTOMER
+  MERCHANT
+  RIDER
+  ADMIN
+
+  @@map("user_type")
+  @@schema("identity")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DELETED
+
+  @@map("user_status")
+  @@schema("identity")
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  VERIFIER
+  SUPPORT
+  FINANCE
+  ANALYST
+
+  @@map("admin_role")
+  @@schema("identity")
+}
+
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+
+  @@map("email_token_purpose")
+  @@schema("identity")
+}
+
+enum PhoneOtpPurpose {
+  RIDER_SIGNUP
+  PHONE_CHANGE
+
+  @@map("phone_otp_purpose")
+  @@schema("identity")
+}
+
+// CHECK constraints and partial indexes live in the migration SQL because
+// Prisma does not model them yet. Keep them in sync when changing this file.
+model User {
+  id              String     @id @db.Uuid
+  type            UserType
+  status          UserStatus @default(ACTIVE)
+  adminRole       AdminRole? @map("admin_role")
+  email           String?
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  phone           String?
+  phoneVerifiedAt DateTime?  @map("phone_verified_at") @db.Timestamptz(6)
+  passwordHash    String     @map("password_hash")
+  failedAttempts  Int        @default(0) @map("failed_attempts")
+  lockedUntil     DateTime?  @map("locked_until") @db.Timestamptz(6)
+  fullName        String     @map("full_name")
+  locale          String     @default("en")
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  refreshTokens RefreshToken[]
+  emailTokens   EmailToken[]
+  consents      UserConsent[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+  @@schema("identity")
+}
+
+model RefreshToken {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  familyId      String    @map("family_id") @db.Uuid
+  tokenHash     Bytes     @map("token_hash") @unique
+  deviceId      String?   @map("device_id")
+  issuedAt      DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt        DateTime? @map("used_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?   @map("revoked_reason")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([familyId])
+  @@map("refresh_tokens")
+  @@schema("identity")
+}
+
+model EmailToken {
+  id        String            @id @db.Uuid
+  userId    String            @map("user_id") @db.Uuid
+  purpose   EmailTokenPurpose
+  tokenHash Bytes             @map("token_hash") @unique
+  expiresAt DateTime          @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime?         @map("used_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("email_tokens")
+  @@schema("identity")
+}
+
+model UserConsent {
+  id         String   @id @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  document   String
+  version    String
+  acceptedAt DateTime @default(now()) @map("accepted_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_consents")
+  @@schema("identity")
+}
+
+model PhoneOtp {
+  id        String          @id @db.Uuid
+  phone     String
+  purpose   PhoneOtpPurpose @default(RIDER_SIGNUP)
+  codeHash  Bytes           @map("code_hash")
+  attempts  Int             @default(0)
+  expiresAt DateTime        @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime?       @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("phone_otps")
+  @@schema("identity")
+}
+
+model AuditLog {
+  id        String   @id @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String
+  details   String?
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+  @@schema("identity")
+}
