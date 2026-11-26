@@ -90,3 +90,35 @@ export const phoneChangeVerifySchema = z.object({
 	phone,
 	code: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
 });
+
+const mfaToken = z.string().min(20, "The confirmation token is missing");
+
+const authenticatorCode = z
+	.string()
+	.trim()
+	.min(6, "Enter the six-digit authenticator code")
+	.max(12, "Enter the six-digit authenticator code");
+
+// Body for starting admin two-factor setup.
+export const adminMfaSetupSchema = z.object({ mfaToken });
+
+// Body for confirming the first authenticator code.
+export const adminMfaEnableSchema = z.object({
+	mfaToken,
+	code: authenticatorCode,
+});
+
+// Body for completing an admin login.
+export const adminMfaVerifySchema = z.object({
+	mfaToken,
+	code: authenticatorCode,
+});
+
+// Body for turning two-factor authentication off.
+export const adminMfaDisableSchema = z.object({
+	password: z.string().min(1, "Password is required"),
+	code: authenticatorCode,
+});
+
+// Body for confirming a sensitive admin action.
+export const adminStepUpSchema = z.object({ code: authenticatorCode });

@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["identity"]
+  schemas  = ["identity", "admin", "catalog", "ordering", "payments", "dispatch"]
 }
 
 enum UserType {
@@ -75,10 +75,27 @@ model User {
   updatedAt       DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
-  refreshTokens RefreshToken[]
-  emailTokens   EmailToken[]
-  consents      UserConsent[]
-  auditLogs     AuditLog[]
+  refreshTokens               RefreshToken[]
+  emailTokens                 EmailToken[]
+  consents                    UserConsent[]
+  auditLogs                   AuditLog[]
+  merchantApplications        MerchantApplication[]  @relation("MerchantApplicant")
+  reviewedMerchantApplications MerchantApplication[] @relation("MerchantApplicationReviewer")
+  riderApplications           RiderApplication[]     @relation("RiderApplicant")
+  reviewedRiderApplications   RiderApplication[]     @relation("RiderApplicationReviewer")
+  resolvedModerationReports   ModerationReport[]     @relation("ModerationReportResolver")
+  updatedSettings             PlatformSetting[]      @relation("PlatformSettingEditor")
+  adminMfa                    AdminMfa?
+  adminRecoveryCodes          AdminRecoveryCode[]
+  restaurants                 Restaurant[]           @relation("RestaurantOwner")
+  customerOrders              Order[]                @relation("CustomerOrders")
+  riderOrders                 Order[]                @relation("RiderOrders")
+  createdOrderEvents          OrderEvent[]           @relation("OrderEventCreator")
+  refundsIssued               Refund[]               @relation("RefundIssuer")
+  wallet                      Wallet?
+  ledgerEntriesCreated        WalletLedgerEntry[]    @relation("LedgerEntryCreator")
+  riderProfile                RiderProfile?
+  idempotencyKeys             IdempotencyKey[]
 
   @@map("users")
   @@schema("identity")
@@ -145,19 +162,425 @@ model PhoneOtp {
 }
 
 model AuditLog {
-  id        String   @id @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  action    String
-  details   String?
-  ip        String?
-  userAgent String?  @map("user_agent")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id         String   @id @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  targetType String?  @map("target_type")
+  targetId   String?  @map("target_id")
+  details    String?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+  @@index([targetType, targetId])
   @@map("audit_logs")
   @@schema("identity")
+}
+
+// ---------- admin module ----------
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("application_status")
+  @@schema("admin")
+}
+
+enum ModerationTargetType {
+  MENU_ITEM
+  RESTAURANT
+
+  @@map("moderation_target_type")
+  @@schema("admin")
+}
+
+enum ModerationReportStatus {
+  OPEN
+  RESOLVED
+
+  @@map("moderation_report_status")
+  @@schema("admin")
+}
+
+model MerchantApplication {
+  id                String            @id @db.Uuid
+  userId            String            @map("user_id") @db.Uuid
+  restaurantName    String            @map("restaurant_name")
+  category          String
+  phone             String
+  address           String
+  businessPermitUrl String?           @map("business_permit_url")
+  taxIdUrl          String?           @map("tax_id_url")
+  status            ApplicationStatus @default(PENDING)
+  decisionNote      String?           @map("decision_note")
+  reviewedById      String?           @map("reviewed_by_id") @db.Uuid
+  reviewedAt        DateTime?         @map("reviewed_at") @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user       User  @relation("MerchantApplicant", fields: [userId], references: [id])
+  reviewedBy User? @relation("MerchantApplicationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([userId])
+  @@map("merchant_applications")
+  @@schema("admin")
+}
+
+model RiderApplication {
+  id                String            @id @db.Uuid
+  userId            String            @map("user_id") @db.Uuid
+  vehicleType       VehicleType
+  nationalIdUrl     String?           @map("national_id_url")
+  licenceUrl        String?           @map("licence_url")
+  bikeRegistrationUrl String?         @map("bike_registration_url")
+  status            ApplicationStatus @default(PENDING)
+  decisionNote      String?           @map("decision_note")
+  reviewedById      String?           @map("reviewed_by_id") @db.Uuid
+  reviewedAt        DateTime?         @map("reviewed_at") @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user       User  @relation("RiderApplicant", fields: [userId], references: [id])
+  reviewedBy User? @relation("RiderApplicationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([userId])
+  @@map("rider_applications")
+  @@schema("admin")
+}
+
+model ModerationReport {
+  id             String                 @id @db.Uuid
+  targetType     ModerationTargetType   @map("target_type")
+  targetId       String                 @map("target_id") @db.Uuid
+  reason         String
+  status         ModerationReportStatus @default(OPEN)
+  resolutionNote String?                @map("resolution_note")
+  resolvedById   String?                @map("resolved_by_id") @db.Uuid
+  resolvedAt     DateTime?              @map("resolved_at") @db.Timestamptz(6)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resolvedBy User? @relation("ModerationReportResolver", fields: [resolvedById], references: [id])
+
+  @@index([status])
+  @@index([targetType, targetId])
+  @@map("moderation_reports")
+  @@schema("admin")
+}
+
+model PlatformSetting {
+  key         String   @id
+  value       String
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  updatedBy User? @relation("PlatformSettingEditor", fields: [updatedById], references: [id])
+
+  @@map("platform_settings")
+  @@schema("admin")
+}
+
+model AdminMfa {
+  userId          String    @id @map("user_id") @db.Uuid
+  secretEncrypted String    @map("secret_encrypted")
+  enabledAt       DateTime? @map("enabled_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("admin_mfa")
+  @@schema("admin")
+}
+
+model AdminRecoveryCode {
+  id        String    @id @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  Bytes     @map("code_hash") @unique
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("admin_recovery_codes")
+  @@schema("admin")
+}
+
+// Stores the first response so a retried admin mutation is replayed, not repeated.
+model IdempotencyKey {
+  id             String   @id @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  route          String
+  key            String
+  requestHash    String   @map("request_hash")
+  responseStatus Int?     @map("response_status")
+  responseBody   String?  @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, route, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+  @@schema("identity")
+}
+
+// ---------- catalog module (minimal, extended by the merchant module) ----------
+
+enum RestaurantStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+
+  @@map("restaurant_status")
+  @@schema("catalog")
+}
+
+enum ItemModerationStatus {
+  VISIBLE
+  FLAGGED
+  HIDDEN
+
+  @@map("item_moderation_status")
+  @@schema("catalog")
+}
+
+model Restaurant {
+  id                String           @id @db.Uuid
+  ownerId           String           @map("owner_id") @db.Uuid
+  name              String
+  category          String
+  phone             String
+  address           String
+  status            RestaurantStatus @default(PENDING)
+  isOpen            Boolean          @default(false) @map("is_open")
+  commissionPercent Int              @default(10) @map("commission_percent")
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  owner     User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  menuItems MenuItem[]
+  orders    Order[]
+
+  @@index([status])
+  @@index([ownerId])
+  @@map("restaurants")
+  @@schema("catalog")
+}
+
+model MenuItem {
+  id               String              @id @db.Uuid
+  restaurantId     String              @map("restaurant_id") @db.Uuid
+  name             String
+  priceFcfa        Int                 @map("price_fcfa")
+  isAvailable      Boolean             @default(true) @map("is_available")
+  moderationStatus ItemModerationStatus @default(VISIBLE) @map("moderation_status")
+  moderationNote   String?             @map("moderation_note")
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
+  @@index([moderationStatus])
+  @@map("menu_items")
+  @@schema("catalog")
+}
+
+// ---------- ordering module (minimal, extended by the ordering module) ----------
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PREPARING
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  COMPLETED
+  DELIVERY_FAILED
+  CANCELLED
+  REJECTED
+
+  @@map("order_status")
+  @@schema("ordering")
+}
+
+enum PaymentMethod {
+  ONLINE
+  COD
+
+  @@map("payment_method")
+  @@schema("ordering")
+}
+
+model Order {
+  id            String        @id @db.Uuid
+  reference     String        @unique
+  customerId    String        @map("customer_id") @db.Uuid
+  restaurantId  String        @map("restaurant_id") @db.Uuid
+  riderId       String?       @map("rider_id") @db.Uuid
+  status        OrderStatus   @default(PLACED)
+  totalFcfa     Int           @map("total_fcfa")
+  paymentMethod PaymentMethod @map("payment_method")
+  version       Int           @default(1)
+  placedAt      DateTime      @default(now()) @map("placed_at") @db.Timestamptz(6)
+  completedAt   DateTime?     @map("completed_at") @db.Timestamptz(6)
+  cancelledAt   DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer   User          @relation("CustomerOrders", fields: [customerId], references: [id])
+  restaurant Restaurant    @relation(fields: [restaurantId], references: [id])
+  rider      User?         @relation("RiderOrders", fields: [riderId], references: [id])
+  events     OrderEvent[]
+  payment    Payment?
+  refunds    Refund[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([restaurantId])
+  @@index([riderId])
+  @@index([placedAt])
+  @@map("orders")
+  @@schema("ordering")
+}
+
+model OrderEvent {
+  id          String      @id @db.Uuid
+  orderId     String      @map("order_id") @db.Uuid
+  version     Int
+  status      OrderStatus
+  note        String?
+  createdById String?     @map("created_by_id") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order     Order @relation(fields: [orderId], references: [id])
+  createdBy User? @relation("OrderEventCreator", fields: [createdById], references: [id])
+
+  @@unique([orderId, version])
+  @@index([orderId, createdAt])
+  @@map("order_events")
+  @@schema("ordering")
+}
+
+// ---------- payments module (minimal, extended by the payments module) ----------
+
+enum PaymentState {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+  REFUNDED
+
+  @@map("payment_state")
+  @@schema("payments")
+}
+
+model Payment {
+  id          String       @id @db.Uuid
+  orderId     String       @unique @map("order_id") @db.Uuid
+  state       PaymentState @default(PENDING)
+  amountFcfa  Int          @map("amount_fcfa")
+  provider    String?
+  providerRef String?      @map("provider_ref")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order   Order    @relation(fields: [orderId], references: [id])
+  refunds Refund[]
+
+  @@index([state])
+  @@map("payments")
+  @@schema("payments")
+}
+
+model Refund {
+  id         String   @id @db.Uuid
+  paymentId  String   @map("payment_id") @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  amountFcfa Int      @map("amount_fcfa")
+  reason     String
+  adminId    String   @map("admin_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  order   Order   @relation(fields: [orderId], references: [id])
+  admin   User    @relation("RefundIssuer", fields: [adminId], references: [id])
+
+  @@index([orderId])
+  @@map("refunds")
+  @@schema("payments")
+}
+
+model Wallet {
+  id          String   @id @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  balanceFcfa Int      @default(0) @map("balance_fcfa")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user    User                @relation(fields: [userId], references: [id])
+  entries WalletLedgerEntry[]
+
+  @@map("wallets")
+  @@schema("payments")
+}
+
+model WalletLedgerEntry {
+  id          String   @id @db.Uuid
+  walletId    String   @map("wallet_id") @db.Uuid
+  amountFcfa  Int      @map("amount_fcfa")
+  reason      String
+  reference   String?
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  wallet    Wallet @relation(fields: [walletId], references: [id])
+  createdBy User?  @relation("LedgerEntryCreator", fields: [createdById], references: [id])
+
+  @@index([walletId, createdAt])
+  @@map("wallet_ledger_entries")
+  @@schema("payments")
+}
+
+// ---------- dispatch module (minimal, extended by the dispatch module) ----------
+
+enum VehicleType {
+  MOTORCYCLE
+  BICYCLE
+  CAR
+
+  @@map("vehicle_type")
+  @@schema("dispatch")
+}
+
+enum RiderVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("rider_verification_status")
+  @@schema("dispatch")
+}
+
+model RiderProfile {
+  userId             String                  @id @map("user_id") @db.Uuid
+  vehicleType        VehicleType             @map("vehicle_type")
+  verificationStatus RiderVerificationStatus @default(PENDING) @map("verification_status")
+  lastLat            Float?                  @map("last_lat")
+  lastLng            Float?                  @map("last_lng")
+  lastSeenAt         DateTime?               @map("last_seen_at") @db.Timestamptz(6)
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("rider_profiles")
+  @@schema("dispatch")
 }

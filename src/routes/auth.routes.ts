@@ -1,5 +1,7 @@
 import { Router } from "express";
 import {
+	disableAdminMfaCode,
+	enableAdminMfaCode,
 	forgotPasswordUser,
 	getMe,
 	loginUser,
@@ -11,10 +13,13 @@ import {
 	requestOtp,
 	requestPhoneChangeCode,
 	resetPasswordUser,
+	setupAdminMfaCode,
+	stepUpAdminSession,
+	verifyAdminMfaCode,
 	verifyPhoneChangeCode,
 } from "../controllers/auth.controller.ts";
+import { adminOnly, riderOnly } from "../middlewares/RBA.ts";
 import { authenticate } from "../middlewares/authenticate.ts";
-import { riderOnly } from "../middlewares/RBA.ts";
 import { rateLimit } from "../middlewares/rateLimit.ts";
 
 const router = Router();
@@ -66,5 +71,32 @@ router.post(
 
 // Returns the signed-in user's profile. authenticate checks the access token.
 router.get("/me", authenticate, rateLimit(60, 900, "me"), getMe);
+
+// Starts two-factor enrolment for an admin who has just passed the password check.
+router.post("/admin/mfa/setup", rateLimit(10, 900, "admin-mfa-setup"), setupAdminMfaCode);
+
+// Confirms the first authenticator code and starts the admin session.
+router.post("/admin/mfa/enable", rateLimit(10, 900, "admin-mfa-enable"), enableAdminMfaCode);
+
+// Completes an admin login with a code or a recovery code.
+router.post("/admin/mfa/verify", rateLimit(10, 900, "admin-mfa-verify"), verifyAdminMfaCode);
+
+// Turns two-factor authentication off. The password and a code are required.
+router.post(
+	"/admin/mfa/disable",
+	authenticate,
+	adminOnly,
+	rateLimit(5, 900, "admin-mfa-disable"),
+	disableAdminMfaCode,
+);
+
+// Confirms a sensitive admin action and returns a stepped-up access token.
+router.post(
+	"/admin/step-up",
+	authenticate,
+	adminOnly,
+	rateLimit(10, 900, "admin-step-up"),
+	stepUpAdminSession,
+);
 
 export default router;

@@ -1,0 +1,2366 @@
+
+REPUBLIC OF CAMEROON
+PEACE – WORK – FATHERLAND
+BUEA, SOUTH WEST REGION
+Technical Design Document
+System Architecture and Design — Multi-Restaurant Food Delivery Platform for Cameroon (Buea Launch)
+Item
+ | Detail
+ | Document
+ | Technical Design Document (TDD), the design companion to the Software Requirements Specification (SRS)
+ | Date
+ | 15 November 2026
+ | Mandated stack
+ | React Native (mobile), Next.js (web), Express (backend)
+ | Cost rule
+ | Every technology must have a usable free tier; no unnecessary bills at the start
+ | Table of Contents
+Introduction
+Architecture Principles
+Technology Stack and Cost Strategy
+System Architecture
+Domain Model and Class Design
+Order State Machine and Idempotency Design
+Payment, Wallet and COD Reconciliation Design
+Dispatch and Geospatial Design
+Delivery Agent Mobile App Design (Offline-First)
+Customer, Merchant and Admin Client Design
+Data Design
+API Design
+Security Design
+Regulatory and Data-Protection Compliance Design
+Observability, Configuration and Operations
+Deployment, Environments and CI/CD
+Testing Strategy
+Risks, Open Decisions and Architecture Decision Log
+Delivery Roadmap
+Appendices: A Glossary; B References and Research Sources; C Identifier Crosswalk
+1. Introduction
+1.1 Purpose
+This Technical Design Document (TDD) describes how the Platform specified in the Software Requirements Specification (SRS) will be built. The SRS states what the system must do and how well; this document states how: the architecture, technology choices, module boundaries, data model, the algorithms for the hard problems (idempotent order processing, uncertain payments, offline synchronisation, dispatch), the deployment model and the cost strategy. Requirements are cited by SRS identifier and are not restated. Rejected alternatives are recorded where cost, connectivity or regulation drove the decision.
+1.2 Scope
+The design covers the complete Platform defined in the SRS: the customer web (Next.js) and mobile (React Native) apps, the merchant dashboard, the delivery agent native app (React Native, Android 8.0+ primary, iOS 15+ secondary), the administrative dashboard, and an Express (Node.js, TypeScript) modular-monolith backend with PostgreSQL, an event queue, a payment adapter layer, notifications and geospatial matching, together with security, regulatory compliance, observability, deployment and testing.
+1.3 Relationship to the SRS
+SRS identifiers (FR-CUS, FR-MER, FR-DEL, FR-ADM, FR-SYS, PR, NFR, BR, CT, DC, NN) are reused so that every design decision traces to a requirement; the requirements themselves are not repeated here. Where a short label used in this document differs from the identifier in the final SRS (the NFR-nn and PR-nn labels and a few FR-SYS-nn and DC-nn labels), Appendix C gives the crosswalk.
+The SRS leaves some decisions open (its Appendix F). This document proposes a default for each one that affects the design and marks it so the team can confirm or overrule it (Chapter 18).
+1.4 Conventions
+Numbers marked as budgets or assumptions are design inputs to be validated during the pilot, not measurements.
+Prices and free-tier limits were researched in November 2026 and change often; each is dated and listed with its source in Appendix B. Confirm them on the provider’s page before committing.
+2. Architecture Principles
+One language, six repositories. TypeScript everywhere, with each of the six deliverables (API, customer web, merchant web, admin web, customer mobile, rider mobile) in its own repository. The API’s OpenAPI document, documented with Swagger UI, is the single source of truth for every repository; it, not shared source code, keeps the backend and the clients in agreement.
+Every write is a command with an idempotency key. Retrying a command can never create a second effect.
+State changes are events. Every order or payment transition writes an event to an outbox table in the same database transaction; consumers react asynchronously.
+Interfaces at every paid or external boundary. Payments, SMS, push, maps, storage, queue and geo-index are behind ports so that the free implementation used at the pilot can be replaced without touching business logic.
+3. Technology Stack and Cost Strategy
+3.1 Selection Criteria
+Each technology was accepted only if it met all of the following: (1) compatible with the mandated React Native, Next.js and Express stack; (2) a free tier that is usable for the pilot and that permits commercial use; (3) no card-on-file requirement where avoidable; (4) a documented exit path to a paid plan or to an equivalent open-source alternative; (5) acceptable latency from Cameroon, meaning a European or global edge location rather than a single US-only region.
+3.2 Stack Overview
+
+3.3 Component Choices
+Layer
+ | Choice
+ | Free tier (researched Nov 2026)
+ | Why / watch-outs
+ | Mobile apps
+ | React Native with Expo (SDK 56, React Native 0.85, New Architecture only)
+ | Framework is free and open source. EAS Free plan: low-priority builds (about 30 per month, at most 15 iOS) and OTA updates for 1,000 monthly active users; local builds cost nothing
+ | The New Architecture is mandatory from SDK 55, so libraries must support it. The 1,000-MAU update ceiling is far above launch scale. Store fees are unavoidable (Chapter 3.5)
+ | Web apps
+ | Next.js (App Router, TypeScript)
+ | Free and open source
+ | Customer web, merchant dashboard and admin dashboard live in separate repositories and follow one written design guideline (colours, typography, spacing) so they look consistent
+ | Web hosting
+ | Cloudflare Workers / Pages via OpenNext adapter
+ | Free plan: 100,000 requests per day, 10 ms CPU per invocation, commercial use allowed; static assets unmetered
+ | Server-rendered pages may exceed 10 ms CPU: render mostly static or client-side data-fetching pages; upgrade path is the $5 per month Workers plan
+ | Backend
+ | Express 5 on Node.js LTS, TypeScript
+ | Framework free
+ | Needs an always-on host for WebSocket and workers; see 3.4
+ | Database
+ | PostgreSQL on Neon (with PostGIS available)
+ | Free plan: 100 CU-hours per project per month, compute scales to zero after 5 minutes idle, wakes in a few hundred milliseconds; storage allowance per project is small (about 0.5 to 1 GB depending on source and date)
+ | 100 CU-hours covers about 400 hours at 0.25 CU, so a database awake 10 hours a day fits. Retention jobs are mandatory to stay inside storage
+ | Cache, rate limit, idempotency fast path
+ | Upstash Redis
+ | Free: 256 MB and 500,000 commands per month
+ | Location pings must not go through it
+ | Queue
+ | pg-boss on PostgreSQL
+ | No cost
+ | Replaced by BullMQ plus a Redis instance only when volume demands it
+ | Realtime
+ | Socket.IO or ws inside Express; Server-Sent Events for customer tracking
+ | No cost
+ | Single instance at pilot; Redis pub/sub adapter when scaling to two instances
+ | Push
+ | Firebase Cloud Messaging through Expo push service
+ | Free
+ | Ringing offers need a high-priority Android channel (Chapter 8)
+ | Object storage
+ | Cloudflare R2
+ | Free: 10 GB storage, 1 million write and 10 million read operations per month, no egress fees
+ | Private buckets with signed URLs for KYC documents and POD photos; lifecycle deletion keeps within 10 GB
+ | Maps (display)
+ | MapLibre (React Native and web) with Protomaps PMTiles hosted on R2
+ | Software free; tiles served from R2 at no egress cost
+ | Avoids per-map-load fees; offline packs for rider routes
+ | Authentication
+ | In-house JWT with refresh rotation, Argon2id hashing, TOTP for admins
+ | No vendor cost
+ | Avoids per-SMS or per-MAU vendor fees
+ | SMS
+ | Provider behind an SmsPort
+ | Not free anywhere; Google Identity Platform lists about $0.26 per SMS for Cameroon
+ | Volume kept tiny by ADR-007
+ | Payments
+ | Aggregator behind PaymentPort (candidates: Notch Pay, CamPay, MeSomb)
+ | Free sandbox; fees per transaction
+ | Direct MTN MoMo and Orange Money APIs need separate operator agreements
+ | Monitoring
+ | Sentry free plan, Better Stack free (10 monitors), structured logs with pino
+ | Free (verify quotas)
+ | One uptime monitor can double as the keep-alive ping
+ | 3.4 Deployment Profiles
+The same codebase runs in three deployment profiles. They differ only in where the backend process runs and whether it is always on.
+Profile
+ | When to use
+ | Components
+ | Monthly cost
+ | Limitations
+ | A – Zero-cost development and closed pilot
+ | Development, demos, supervised pilot with staff acting as riders
+ | Cloudflare (web, DNS, R2); Render free web service running Express with a scheduled keep-alive ping; Neon free PostgreSQL; Upstash free Redis (optional); Expo free plan
+ | $0
+ | Cold start of about a minute if the keep-alive fails; one backend instance; free tiers can be reduced by providers without notice
+ | B – Free always-on VM
+ | Team wants an always-on backend at no recurring fee and accepts operational risk
+ | Oracle Always Free Arm VM (2 OCPU, 12 GB) running Express, pg-boss workers and an optional self-hosted Redis behind Caddy; Cloudflare in front; Neon or PostgreSQL on the same VM
+ | $0 plus a payment card on file at signup
+ | Arm builds; capacity and idle-reclaim risk; the team owns patching, backups and uptime
+ | C – Recommended go-live
+ | First real riders and customers
+ | Profile A with the Express service moved to an always-on paid instance (about $7 per month on Render)
+ | About $7
+ | Still one instance; scale-out needs Redis pub/sub (Chapter 8)
+ | The application never assumes a profile. Configuration selects the implementation of each port (Chapter 4.5): for example GEO_INDEX=memory or redis, QUEUE=pgboss, STORAGE=r2, SMS=disabled or provider.
+3.5 Cost Register: What Will Actually Cost Money
+A free stack still has unavoidable costs. They are listed so that nothing arrives as a surprise.
+Item
+ | When
+ | Amount (as researched)
+ | Can it be avoided?
+ | Google Play developer registration
+ | Before publishing the Android apps
+ | One-time fee (about $25; confirm)
+ | No, but side-loading APKs to pilot riders avoids it until launch
+ | Apple Developer Program
+ | Only when iOS apps ship
+ | About $99 per year (confirm)
+ | Yes, iOS is the secondary platform (NFR-52)
+ | Domain name
+ | Before launch
+ | About $10 to $15 per year
+ | No; use the free workers.dev address during development
+ | Always-on backend instance
+ | When real riders depend on offers
+ | About $7 per month
+ | Only by Profile B (with its risks)
+ | SMS messages
+ | Rider sign-up; optional customer fallback
+ | Priced per message; Cameroon is among the highest-priced destinations on one major provider list
+ | Largely: ADR-007 shows the delivery OTP in-app
+ | Payment aggregator fees
+ | Per transaction
+ | Percentage per transaction; sandbox is free
+ | No; it is a cost of sales and belongs in unit economics (DC-09)
+ | Paid upgrades (only if free limits are exceeded)
+ | On a usage trigger
+ | Cloudflare Workers $5 per month; Neon Launch $5 per month minimum plus usage; Upstash $0.20 per 100,000 commands; Expo Starter $19 per month
+ | Yes: mostly static pages, retention jobs, operating-hours scheduling, local builds, ADR-004 and ADR-005
+ | Regulatory certification and authorisations (ART, ANTIC, NECAP, Data Protection Authority)
+ | Before the first live transaction
+ | Not researched; obtain from the authorities
+ | No (non-negotiable NN-1)
+ | Month-one bill at go-live (Profile C): about $7 for the backend plus the domain share of about $1, and a one-time store fee of about $25. Everything else is $0 until a free-tier limit is exceeded. Payment and SMS charges scale with sales and are recovered through order margins.
+4. System Architecture
+4.1 Architectural Style
+The backend is a modular monolith in its own repository (resto-api). Inside each module the code is layered as routes, controllers, services and repositories: routes declare endpoints and middleware, controllers handle HTTP, services hold the business rules, and repositories are the only code that talks to PostgreSQL. Services never touch Express or SQL directly. Calls to paid or external providers (payments, SMS, push, storage, queue, geo-index) go through small interfaces (ports) that adapters implement. This gives three benefits that matter here: free-tier components can be replaced without rewriting business logic, services can be tested with fake repositories and adapters, and a module can later be extracted into a service by replacing its in-process calls with network calls.
+Modules communicate in two ways only: synchronous calls through a module’s public interface, and asynchronous domain events through the outbox (Chapter 6). A module may never read another module’s tables directly. This rule is enforced in code by lint rules (dependency-cruiser) and in the database by separate schemas per module.
+4.2 System Context
+4.3 Use Case Diagrams
+4.3.1 Customer
+
+4.3.2 Merchant and Restaurant Staff
+
+4.3.3 Delivery Agent
+
+4.3.4 System Administrator
+
+4.4 Container View
+The two backend processes are built from the same code base and started with different entry points. At the pilot a single instance runs both (WORKERS_IN_PROCESS=true) because the free hosting tier allows one service; later the worker process is started as a separate service.
+4.5 Modules and Ports
+4.5.1 Module Catalogue
+Module
+ | Responsibility
+ | identity
+ | Registration, login, tokens, MFA for admins, password recovery, roles, sessions
+ | catalog
+ | Restaurants, menus, option groups, prices, inventory, availability, promotions
+ | cart
+ | Single-restaurant cart aggregate, restaurant switch, totals
+ | ordering
+ | Checkout, order aggregate, state machine, cancellation, history
+ | payments
+ | Payment attempts, adapter calls, webhooks, reconciliation, refunds, wallet ledger
+ | dispatch
+ | Rider availability, geo index, offers, assignment, reassignment
+ | delivery
+ | Delivery lifecycle, proof of delivery, failure reasons, pin corrections, address asset
+ | notifications
+ | Push, in-app, SMS fallback, email, templates, retries
+ | support
+ | Reviews, support tickets, safety incidents, favourites
+ | admin
+ | Verification queues, moderation, dispute console, settings, audit log
+ | analytics
+ | Read models and reports for merchants and admins
+ | platform
+ | Outbox, idempotency, config, feature flags, regulatory flags, clock
+ | 4.5.2 Allowed Dependencies
+Solid arrows are synchronous calls through a module’s public interface. Dotted arrows are asynchronous domain events delivered through the outbox.
+
+4.5.3 Ports and Adapters
+Port (interface)
+ | Pilot adapter
+ | Later adapter
+ | Purpose
+ | PaymentPort
+ | Aggregator adapter (Notch Pay, CamPay or MeSomb)
+ | Direct MTN MoMo and Orange Money adapters
+ | Collect, query status, refund, payout
+ | SmsPort
+ | Disabled by default; one provider adapter for rider OTP
+ | Second provider for redundancy
+ | OTP and fallback messages
+ | PushPort
+ | Expo push service (FCM and APNs)
+ | Direct FCM
+ | Offers, order updates
+ | StoragePort
+ | Cloudflare R2 through the S3 API
+ | Any S3-compatible store
+ | KYC documents, POD photos, signed URLs
+ | GeoIndexPort
+ | In-memory index
+ | Redis GEO index
+ | Nearest available riders
+ | QueuePort
+ | pg-boss on PostgreSQL
+ | BullMQ on Redis
+ | Background jobs and retries
+ | EventBusPort
+ | Outbox table polled by workers
+ | Message broker
+ | Domain event fan-out
+ | IdempotencyStorePort
+ | PostgreSQL table
+ | PostgreSQL plus Redis fast path
+ | Command de-duplication
+ | RegulatorReportPort
+ | Queue-backed NECAP reporter (stub until interconnection exists)
+ | Live interconnection adapter
+ | Real-time transaction reporting
+ | ClockPort
+ | System clock
+ | Fake clock in tests
+ | Deterministic time
+ | 4.6 Backend Code Structure
+Each module follows the same four-layer folder structure: routes, controllers, services and repositories. A request flows downward through the layers and a response flows back up; a layer may only call the layer directly beneath it.
+Routes. Declare the URL, HTTP method, middleware (authentication, role check, rate limit, idempotency guard) and the zod schema for each endpoint. No logic.
+Controllers. Read the validated request, call exactly one service method, and map the result or error to the standard response envelope. No business rules and no SQL.
+Services. Hold the business rules: invariants, the order and payment state machines, fee and money calculations. A service opens the database transaction, calls repositories, writes outbox events, and calls ports for external providers. Services call other modules only through that module’s service.
+Repositories. The only code that runs SQL. Each repository belongs to one module and its tables, takes the transaction handle from the service, and returns plain typed records. A repository never calls another repository of a different module.
+4.7 Repository Layout
+The Platform is built as six independent repositories, one for each thing that has to be built. There is no monorepo and no shared source package: each repository has its own dependencies, CI pipeline, versioning and release cycle.
+resto-api/                    Express backend (TypeScript)
+  src/                        modules (routes, controllers, services, repositories), platform, ports, adapters
+  migrations/                 versioned SQL migrations
+  openapi/                    OpenAPI 3.1 document: the single source of truth, served by Swagger UI and published with each release
+  infra/                      Wrangler config, Render blueprint, CI workflows
+  docs/                       SRS, this TDD, ADRs
+
+resto-web-customer/           Next.js customer web
+  src/
+    api/                      types generated from the OpenAPI document; typed client with idempotency keys and retry
+    components/               own components and design tokens
+    lib/geo/                  haversine, plus codes helpers, landmark formatting
+    i18n/                     English and French dictionaries (English default)
+
+resto-web-merchant/           Next.js merchant dashboard
+  src/
+    api/                      generated types and typed client
+    components/               own components and design tokens
+    i18n/                     English and French dictionaries (English default)
+
+resto-web-admin/              Next.js admin dashboard
+  src/
+    api/                      generated types and typed client
+    components/               own components and design tokens
+    i18n/                     English and French dictionaries (English default)
+
+resto-mobile-customer/        React Native (Expo)
+  src/
+    api/                      generated types and typed client with retry
+    lib/geo/                  haversine, plus codes helpers, landmark formatting
+    i18n/                     English and French dictionaries (English default)
+
+resto-mobile-rider/           React Native (Expo development build with native modules)
+  src/
+    api/                      generated types, typed client, offline command queue and sync
+    lib/geo/                  haversine, plus codes helpers, landmark formatting
+    i18n/                     English and French dictionaries (English default)
+Single source of truth: the OpenAPI 3.1 document of resto-api is the one contract for all six repositories. It is generated from the zod schemas and route definitions in the API code, so it cannot drift from what the server actually accepts, and it is served as interactive Swagger UI documentation at /docs (and as raw JSON at /openapi.json) in development and staging; in production the page is disabled or restricted to administrators. Every release publishes a versioned copy of the document. Each client repository regenerates its API types from that copy (for example with openapi-typescript) and fails its own CI build if an API change breaks it; the mobile and web teams read the same Swagger UI page to see endpoints, schemas, error envelopes and the Idempotency-Key requirement. Breaking changes are caught by an OpenAPI diff in CI and follow the versioning rule in Chapter 12.1, so an older app version keeps working. Small helpers such as the geo and i18n utilities are deliberately duplicated per repository rather than shared, which avoids publishing and versioning a shared package.
+4.8 Request Pipeline
+Every HTTP request passes one ordered chain: request identifier and logging context; security headers, CORS allow-list and body size limit; rate limiting; authentication; authorisation (role and ownership); input validation with the route’s zod schema (unknown fields rejected); idempotency guard for mutating routes (Chapter 6); controller, which calls the service inside a database transaction (the service calls the repositories); error mapper to the standard error envelope without leaking internals (NFR-39).
+4.9 Process Model
+Role
+ | Responsibilities
+ | Pilot placement
+ | Web process
+ | REST API, WebSocket gateway, SSE streams, in-memory geo index
+ | Single backend instance
+ | Worker process
+ | Outbox publisher, offer expiry timers, payment reconciliation, retention and purge jobs, report generation
+ | Same instance (in-process) at pilot, separate service later
+ | Scheduler
+ | Daily reconciliation, retention, keep-alive self-checks
+ | pg-boss schedules inside the worker
+ | 5. Domain Model and Class Design
+5.1 Conventions
+Identifiers are UUIDs (version 7, time-ordered, which keeps B-tree indexes compact and inserts append-friendly).
+Money is stored as an integer number of FCFA (XAF has no minor unit), in a Money value object; floating point is never used for money.
+Timestamps are stored in UTC (timestamptz) and displayed in the Africa/Douala time zone.
+Entities are never hard-deleted when they have financial or audit significance; they are marked inactive or archived.
+Orders and order items store snapshots of names and prices at submission time so later menu edits never change history (SRS 3.3.3).
+5.2 Class Diagrams
+5.2.1 Identity and Catalog
+
+5.2.2 Cart, Address and Order
+
+5.2.3 Payments, Wallet and Delivery
+5.2.4 Administration and Support
+5.3 Aggregates and Invariants
+An aggregate is the unit that is loaded, changed and saved in one transaction. Invariants are checked in the service layer before saving, and the most important ones are repeated as database constraints so that a bug cannot corrupt data.
+Aggregate
+ | Invariants (service layer)
+ | Database backing
+ | Cart
+ | At most one active cart per customer; every item belongs to the cart’s restaurant; quantity at least 1; unavailable items cannot be added (BR-CUS-01, FR-CUS-09)
+ | Unique partial index on active cart per customer; foreign key from item to menu item with restaurant check
+ | Order
+ | Exactly one restaurant; items match the restaurant; status moves only along allowed transitions; version increases by 1 per transition; total equals components (BR-CUS-02, FR-SYS-01)
+ | Check constraint on total; unique (order id, version) on events; foreign keys
+ | Payment
+ | At most one successful payment per order; an UNKNOWN payment can only move to a final state through reconciliation; amount equals order total
+ | Unique partial index on succeeded payment per order; state check constraint
+ | Wallet and ledger
+ | Every ledger transaction balances (sum of debits equals sum of credits); ledger rows are never updated or deleted; cached balance equals the ledger sum
+ | Deferred constraint trigger for balance; revoked UPDATE and DELETE privileges
+ | Offer
+ | One accepted offer per order; accepted only before expiry; accepted only by an online rider of a compatible vehicle type
+ | Unique partial index on accepted offer per order
+ | Delivery
+ | Completion requires a proof of delivery; COD completion requires a verified OTP and a cash record (FR-DEL-5.1, 6.2)
+ | Check via application rule plus not-null cash fields when payment method is COD
+ | Address
+ | Landmark note is mandatory for delivery addresses (FR-SYS-06); a corrected pin never overwrites the original pin
+ | Not-null constraint on landmark note; separate corrected_pin column
+ | AuditLogEntry
+ | Append only (NFR-11)
+ | Trigger rejecting UPDATE and DELETE; insert-only database role
+ | 5.4 Address Asset Design
+Buea addressing is landmark-relative and map pins are often 50 to 100 m off (CT-4). The address asset therefore stores more than coordinates and improves with use.
+Rider pin correction (FR-DEL-4.5): on arrival the rider may move the pin. The correction is stored as a PinCorrection with the rider, the time and a confirmation count, linked to the address; the original pin is never overwritten.
+Promotion rule: a corrected pin becomes the address’s effective pin after one correction by a verified rider, and is re-confirmed when a later delivery ends within 30 m of it. If two corrections disagree by more than 100 m, the address is flagged for admin review.
+6. Order State Machine and Idempotency Design
+The order state machine is the most important mechanism in the Platform (DC-03, FR-SYS-01). Every transition is idempotent, versioned and event-emitting; duplicate charges and phantom deliveries are treated as engineering defects. This chapter specifies the order and delivery state machines, the versioning rule, the idempotency mechanism and the outbox that turns state changes into events.
+6.1 Order State Machine
+The commercial lifecycle of an order (what the customer and merchant see) is separated from the logistic lifecycle of its delivery (what the rider does). The two machines are coordinated through events, which keeps each small and testable.
+
+6.1.1 Transition Table
+From
+ | Command or event
+ | To
+ | Actor
+ | Guard
+ | Event emitted
+ | (none)
+ | PlaceOrder
+ | PENDING_PAYMENT or PLACED
+ | Customer
+ | Cart valid; one restaurant; restaurant accepting orders; items available and prices revalidated; landmark note present for delivery
+ | OrderCreated
+ | PENDING_PAYMENT
+ | PaymentSucceeded
+ | PLACED
+ | System
+ | Payment amount equals order total
+ | OrderPlaced
+ | PENDING_PAYMENT
+ | PaymentFailed or timeout
+ | CANCELLED
+ | System
+ | Payment is in a final failed state, never UNKNOWN
+ | OrderCancelled
+ | PLACED
+ | AcceptOrder
+ | ACCEPTED
+ | Merchant or staff
+ | Restaurant open
+ | OrderAccepted
+ | PLACED
+ | RejectOrder or acceptance timeout
+ | REJECTED
+ | Merchant or system
+ | Reason recorded
+ | OrderRejected
+ | PLACED
+ | CancelOrder
+ | CANCELLED
+ | Customer
+ | Cancellation window open (OD-03)
+ | OrderCancelled
+ | ACCEPTED
+ | StartPreparing
+ | PREPARING
+ | Merchant
+ | None
+ | OrderPreparing
+ | PREPARING
+ | MarkReady
+ | READY_FOR_PICKUP
+ | Merchant
+ | None
+ | OrderReady
+ | READY_FOR_PICKUP
+ | PickedUp (from delivery)
+ | OUT_FOR_DELIVERY
+ | System
+ | Delivery status is PICKED_UP
+ | OrderOutForDelivery
+ | OUT_FOR_DELIVERY
+ | DeliveryCompleted
+ | COMPLETED
+ | System
+ | POD present; OTP verified for COD
+ | OrderCompleted
+ | OUT_FOR_DELIVERY
+ | DeliveryFailed
+ | DELIVERY_FAILED
+ | System
+ | Failure reason recorded
+ | OrderDeliveryFailed
+ | Any non-terminal
+ | AdminOverride
+ | Any allowed state
+ | Admin
+ | Audit entry written in the same transaction
+ | OrderOverridden
+ | 6.2 Delivery State Machine
+
+The rider app triggers AT_PICKUP, PICKED_UP, AT_DROPOFF, DELIVERED and FAILED as commands that may be created offline and replayed later; each carries a client action identifier and the device time at which the action happened, so the server stores both the occurrence time and the receipt time (Chapter 9).
+6.3 Versioned, Optimistic Transitions
+Every aggregate row carries an integer version. A transition succeeds only if the row still has the status and version the caller read; otherwise the transition is rejected as a conflict and the caller re-reads. This removes lost updates when a merchant accepts at the same moment the customer cancels, or when an admin override races a rider action.
+The three writes (state, event history, outbox) share one database transaction. A transition therefore either happens completely, with its history and its event, or not at all. The unique constraint on (order id, version) in the event table is the last line of defence against a double transition.
+6.4 Idempotency Design
+Mobile networks drop mid-request, and the rider app replays queued actions after reconnecting. The system must never double-charge or double-order (NN-2, FR-SYS-02, NFR-22).
+6.4.1 Key Rules
+The client generates a UUID idempotency key when the user performs the action, stores it before sending, and reuses it on every retry of that action.
+The key is sent in the Idempotency-Key header on every POST, PUT, PATCH and DELETE.
+The server scopes a key by user and route, and stores a hash of the request body with it.
+Same key and same body: the stored response is returned and nothing is executed again.
+Same key and different body: rejected with 422 (a client bug).
+Same key while the first request is still running: 409 with Retry-After; the client waits and retries.
+Keys expire after 24 hours for online clients and after 30 days for keys created by the rider app, because a rider can be offline for long periods.
+6.4.2 Storage
+CREATE TABLE platform.idempotency_keys (
+  scope           text        NOT NULL,   -- user id plus route
+  key             uuid        NOT NULL,
+  request_hash    bytea       NOT NULL,
+  status          text        NOT NULL,   -- IN_PROGRESS or COMPLETED
+  response_status int,
+  response_body   jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  expires_at      timestamptz NOT NULL,
+  PRIMARY KEY (scope, key)
+);
+CREATE INDEX ON platform.idempotency_keys (expires_at);
+PostgreSQL is the source of truth (ADR-005). The claim is an INSERT that relies on the primary key: the first request inserts IN_PROGRESS and proceeds, a concurrent duplicate hits the conflict and is told to wait. When Redis is available it caches completed responses to avoid a database read on replays, but correctness never depends on it.
+6.4.3 Natural Idempotency as a Second Layer
+Business-level unique constraints protect against bugs in the key mechanism itself:
+Operation
+ | Natural key
+ | Constraint
+ | Place order
+ | (customer id, cart id, cart version)
+ | Unique index on orders
+ | Create payment
+ | (order id) where state is not failed
+ | Unique partial index; one open payment per order
+ | Rider action
+ | (delivery id, action, client action id)
+ | Unique index on delivery events
+ | Wallet posting
+ | (transaction id)
+ | Unique index on ledger transaction
+ | Webhook processing
+ | (provider, provider event id)
+ | Unique index on processed webhooks
+ | Order event
+ | (order id, version)
+ | Unique index
+ | 6.5 Transactional Outbox and Event Catalogue
+Domain events are written to platform.outbox inside the same transaction as the state change. A relay in the worker reads unpublished rows with SELECT ... FOR UPDATE SKIP LOCKED, publishes them to in-process consumers or queue jobs, and marks them published. Delivery is at least once, so every consumer is idempotent: it records the event identifier in a processed_events table and skips repeats.
+Event
+ | Producer
+ | Consumers
+ | Essential payload
+ | OrderCreated
+ | ordering
+ | payments
+ | order id, total, payment method
+ | PaymentSucceeded, PaymentFailed
+ | payments
+ | ordering
+ | order id, payment id, provider reference
+ | PaymentUnknown
+ | payments
+ | admin alerts, reconciliation
+ | payment id, last provider status
+ | OrderPlaced
+ | ordering
+ | notifications (merchant), analytics
+ | order id, restaurant id, total
+ | OrderAccepted
+ | ordering
+ | dispatch, notifications (customer)
+ | order id, pickup point, drop-off point, payment method
+ | OfferCreated, OfferAccepted, OfferExpired
+ | dispatch
+ | notifications, ordering, analytics
+ | offer id, order id, rider id
+ | OrderReady
+ | ordering
+ | dispatch (rider), notifications
+ | order id
+ | DeliveryPickedUp
+ | delivery
+ | ordering, notifications
+ | delivery id, time
+ | DeliveryCompleted
+ | delivery
+ | ordering, payments (ledger), analytics
+ | delivery id, cash collected, POD ids
+ | DeliveryFailed
+ | delivery
+ | ordering, admin alerts
+ | delivery id, reason
+ | OrderCancelled, OrderRejected
+ | ordering
+ | payments (refund), notifications
+ | order id, reason
+ | WalletPosted
+ | payments
+ | notifications, analytics
+ | wallet id, amount, reference
+ | AdminActionLogged
+ | admin
+ | audit
+ | admin id, action, target
+ | 6.6 Checkout Sequence
+
+The webhook is never trusted on its own: the handler queries the provider for the transaction status before changing state (FR-CUS-21 (e)), and the webhook itself is idempotent by provider event identifier.
+6.7 Cancellation and Refund Rules (Proposed, see OD-03 and OD-04)
+Automatic customer cancellation is allowed in PENDING_PAYMENT and in PLACED before the merchant accepts.
+After acceptance the customer can only request cancellation; the merchant or an administrator decides.
+A refund is created only when a payment is SUCCEEDED and the order ends in CANCELLED or REJECTED; it is never created from an UNKNOWN payment (Chapter 7).
+7. Payment, Wallet and COD Reconciliation Design
+The strategic bet of the project is that winners solve cash-on-delivery reconciliation and payment collection reliability better than anyone else. This chapter therefore specifies the payment adapter, the payment state machine including the UNKNOWN state, the double-entry ledger that backs rider wallets and merchant balances, and the reconciliation jobs that keep money consistent.
+7.1 Payment Adapter Interface
+Business logic talks to one interface; each provider (an aggregator at launch, direct MTN MoMo and Orange Money later) implements it (DC-04, FR-SYS-03).
+// ports/paymentPort.ts (illustrative)
+export type Channel = 'cm.mtn' | 'cm.orange';
+
+export interface CollectRequest {
+  reference: string;        // our unique payment reference, also the provider idempotency reference
+  amount: Money;            // integer FCFA
+  channel: Channel;
+  customerPhone: string;    // E.164
+  description: string;
+  callbackUrl: string;
+}
+
+export type ProviderStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'NOT_FOUND';
+
+export interface PaymentPort {
+  collect(req: CollectRequest): Promise<{ providerRef: string; status: ProviderStatus }>;
+  getStatus(reference: string): Promise<{ status: ProviderStatus; providerRef?: string }>;
+  parseWebhook(headers: Headers, rawBody: Buffer): WebhookEvent;   // verifies the signature
+  payout(req: PayoutRequest): Promise<{ providerRef: string; status: ProviderStatus }>;
+  refund(providerRef: string, amount: Money): Promise<{ status: ProviderStatus }>;
+  listSettlements(day: string): Promise<SettlementLine[]>;          // for daily reconciliation
+}
+The adapter maps every provider-specific response to the small ProviderStatus set. It must treat a timeout, a connection reset or an unparseable response as an unknown outcome, never as a failure: it throws a ProviderUnknownError that the payments module converts to the UNKNOWN state.
+7.2 Payment State Machine
+
+State
+ | Meaning
+ | Order effect
+ | Who may leave it
+ | CREATED
+ | Row written, provider not yet confirmed receipt
+ | Order stays PENDING_PAYMENT
+ | Payments module
+ | PENDING
+ | Provider accepted; waiting for the customer to approve
+ | Order stays PENDING_PAYMENT
+ | Webhook plus status query, or timeout job
+ | SUCCEEDED
+ | Money confirmed by a provider status query
+ | Order moves to PLACED
+ | Refund flow only
+ | FAILED, CANCELLED, EXPIRED
+ | Final unsuccessful outcomes
+ | Order moves to CANCELLED
+ | Nobody; customer may start a new payment
+ | UNKNOWN
+ | Outcome not known (network dropped mid-request or status unreachable)
+ | Order stays PENDING_PAYMENT; customer sees Confirming your payment
+ | Reconciliation job or an administrator only
+ | REFUND_PENDING, REFUNDED
+ | Refund in progress or done
+ | Order already CANCELLED or REJECTED
+ | Provider confirmation
+ | 7.2.1 Rules for UNKNOWN (FR-SYS-03, DC-05)
+UNKNOWN never triggers a refund. A refund of money that may never have been collected would lose money.
+UNKNOWN never triggers a new collection for the same order with a new reference, because the first one may still succeed and the customer would be charged twice.
+UNKNOWN triggers reconciliation: the worker queries the provider by our reference until the provider gives a definite answer.
+The customer sees a neutral message and can keep using the app; the order is not cancelled and not confirmed.
+After the final retry window the payment goes to the administrator queue with the provider reference and timestamps for manual reconciliation against the provider dashboard.
+7.3 Reconciliation Design
+7.3.1 Per-Payment Reconciliation of UNKNOWN and PENDING Payments
+The schedule below is a proposed default, configurable through platform settings, to be tuned during the pilot.
+Attempt
+ | Delay after previous
+ | Action
+ | 1
+ | 30 seconds
+ | Query provider by reference
+ | 2 to 4
+ | 1, 2 and 5 minutes
+ | Query provider
+ | 5 to 8
+ | 15 minutes
+ | Query provider
+ | 9 to 32
+ | 1 hour
+ | Query provider (about 24 hours in total)
+ | After attempt 32
+ | None
+ | Mark for administrator review; alert; payment remains UNKNOWN
+ | A provider answer of NOT_FOUND is treated as final failure only after the provider’s documented retention-and-expiry window has passed; before that it is treated as still unknown.
+7.3.2 Daily Settlement Reconciliation
+A scheduled job compares the platform’s payment and payout records for the day with the provider’s settlement list (listSettlements) and writes the differences to a reconciliation report in the admin dashboard (FR-SYS-05, CT-3).
+Difference
+ | Likely cause
+ | Action
+ | Provider success, platform UNKNOWN or PENDING
+ | Lost webhook or dropped response
+ | Mark SUCCEEDED through the normal path; post ledger
+ | Provider success, platform FAILED
+ | Late approval after expiry
+ | Critical alert; administrator decides refund or fulfil
+ | Platform SUCCEEDED, provider missing
+ | Wrong reference or provider incident
+ | Critical alert; hold payouts for that order
+ | Amount mismatch
+ | Fee or currency handling
+ | Investigate; no automatic correction
+ | Payout sent, platform pending
+ | Dropped response on payout
+ | Mark paid; never resend
+ | 7.4 Wallet and Ledger Design
+Wallets are not balance columns that are updated; they are views over an append-only, double-entry ledger. Each business event posts one ledger transaction whose lines sum to zero. The cached balance on the wallet row is a derived value that a nightly job verifies against the ledger.
+7.4.1 Accounts
+Account
+ | Type
+ | Holder
+ | Meaning
+ | PROVIDER_CLEARING
+ | Asset
+ | Platform
+ | Money collected at the aggregator and not yet settled to the platform
+ | ORDER_LIABILITY
+ | Liability
+ | Platform
+ | Customer money held for an order until completion
+ | MERCHANT_PAYABLE
+ | Liability
+ | Per restaurant
+ | Amount owed to the restaurant
+ | RIDER_WALLET_AVAILABLE
+ | Liability
+ | Per rider
+ | Rider money that can be withdrawn or used
+ | RIDER_WALLET_HELD
+ | Liability
+ | Per rider
+ | Rider money reserved to back accepted COD orders
+ | PLATFORM_REVENUE
+ | Revenue
+ | Platform
+ | Commissions and fees earned
+ | REFUNDS_PAYABLE
+ | Liability
+ | Platform
+ | Refunds approved and not yet paid out
+ | 7.4.2 Money Split on Completion
+merchant_commission = food_subtotal * merchant_commission_rate      (platform setting, FR-ADM-07)
+merchant_payable    = food_subtotal - merchant_commission
+rider_commission    = delivery_fee * rider_commission_rate          (platform setting; shown per run, FR-DEL-7.5)
+rider_earning       = delivery_fee - rider_commission + tip
+platform_revenue    = merchant_commission + rider_commission + service_fee
+check               = merchant_payable + rider_earning - tip + platform_revenue = total - discount_funded_by_restaurant
+All amounts are integers in FCFA; rounding is done once, in a single documented function, with the remainder assigned to platform revenue so that every transaction balances exactly.
+7.4.3 Posting Rules
+Event
+ | Debit
+ | Credit
+ | Note
+ | Online payment succeeded
+ | PROVIDER_CLEARING (total)
+ | ORDER_LIABILITY (total)
+ | Posted when the provider status is confirmed
+ | Prepaid order completed
+ | ORDER_LIABILITY (total)
+ | MERCHANT_PAYABLE (merchant_payable); RIDER_WALLET_AVAILABLE (rider_earning); PLATFORM_REVENUE (platform_revenue)
+ | Rider credited at handover (FR-DEL-7.2)
+ | COD offer accepted
+ | RIDER_WALLET_AVAILABLE (cash to collect)
+ | RIDER_WALLET_HELD (cash to collect)
+ | Reserve; balance check happens before the offer is shown (FR-DEL-7.3)
+ | COD order completed with cash collected
+ | RIDER_WALLET_HELD (total)
+ | ORDER_LIABILITY (total)
+ | The wallet funds the order; the rider keeps the physical cash
+ | Then the same split as a prepaid order
+ | ORDER_LIABILITY (total)
+ | MERCHANT_PAYABLE; RIDER_WALLET_AVAILABLE; PLATFORM_REVENUE
+ |
+ | COD delivery failed
+ | RIDER_WALLET_HELD
+ | RIDER_WALLET_AVAILABLE
+ | Reserve released
+ | Rider wallet top-up succeeded
+ | PROVIDER_CLEARING
+ | RIDER_WALLET_AVAILABLE
+ | Through the same payment states as a collection
+ | Withdrawal requested
+ | RIDER_WALLET_AVAILABLE
+ | RIDER_WITHDRAWAL_PENDING
+ | Held until payout is confirmed
+ | Withdrawal paid
+ | RIDER_WITHDRAWAL_PENDING
+ | PROVIDER_CLEARING
+ | Mirror of payout
+ | Refund approved
+ | ORDER_LIABILITY
+ | REFUNDS_PAYABLE
+ | Then paid out through the adapter
+ | Admin wallet adjustment (FR-ADM-05)
+ | Chosen account
+ | Chosen account
+ | Requires reason; audit entry in the same transaction
+ | Wallet-backed COD means the rider never carries unbacked cash risk: at the moment of acceptance the platform already holds an equal amount of the rider’s own money (FR-SYS-05, CT-3). When the rider’s available balance cannot cover the next COD order, dispatch simply stops offering COD orders to that rider (FR-DEL-7.3) and the app shows a Top up banner.
+7.5 Rider Top-Up and Withdrawal Flows
+Top-up: the rider enters an amount in the app; the platform creates a collection through the same PaymentPort; only SUCCEEDED credits the wallet. UNKNOWN top-ups follow the same reconciliation, so a dropped network never loses a rider’s money or credits it twice.
+Withdrawal (FR-DEL-7.4): the rider requests a payout to MoMo, Orange Money or bank; a biometric check on the device and a server-issued step-up token are required (NFR-10). The ledger moves the amount to a pending account, the payout is sent with a unique reference, and the pending amount is finalised or released only on a definite provider answer. A payout with an unknown outcome is reconciled, never resent. Target settlement: within 24 business hours.
+7.6 Provider Integration Notes
+At launch the adapter targets a payment aggregator rather than each mobile operator (ADR-009): direct operator APIs need separate merchant agreements and production approvals, while aggregators expose MTN and Orange through one API with a sandbox (success, insufficient funds, timeout, cancellation), mobile-money transfers and webhooks. Provider, keys, callback URL and sandbox or live mode are environment configuration. Aggregator fees and settlement times come from the signed agreement (DC-09). Webhook handling is in Chapter 12.6; NECAP reporting is in Chapter 14.
+8. Dispatch and Geospatial Design
+Dispatch connects an accepted order to a rider within seconds, on a network that may be slow, and without draining rider batteries. It covers rider availability, the geo index, the offer lifecycle, the first-come-first-serve pool, offer delivery to a locked phone, and live tracking for customers.
+8.1 Tunable Parameters
+All values below are platform settings (FR-ADM-07) delivered to clients through remote configuration (NFR-62), so they can be tuned without a store release.
+Parameter
+ | Default
+ | Purpose
+ | offer_timeout_seconds
+ | 30
+ | Countdown of a targeted offer
+ | search_radius_m
+ | 3,000
+ | Maximum rider distance from the restaurant
+ | targeted_rounds
+ | 1
+ | Number of one-rider offers before opening the pool
+ | pool_window_seconds
+ | 60
+ | How long the first-come-first-serve pool stays open
+ | restaurant_wait_alert_minutes
+ | 10
+ | Wait timer before Contact Support appears
+ | gps_interval_moving_s
+ | 5
+ | Sampling interval while moving
+ | gps_interval_stopped_s
+ | 30
+ | Sampling interval while stopped
+ | gps_interval_idle_s
+ | 60
+ | Sampling interval while online and idle
+ | cod_min_wallet_margin
+ | 0 FCFA
+ | Extra balance required above the COD amount
+ | 8.2 Rider Availability and Eligibility
+A rider can receive an offer only if all of the following hold:
+Rider is verified (FR-ADM-02) and not suspended (FR-ADM-03).
+Rider is Online (FR-DEL-2.1) and sent a location within the last 90 seconds.
+Vehicle type is compatible with the order type (FR-DEL-1.3).
+Rider has no active delivery (one order at a time at the pilot).
+For COD orders, the available wallet balance covers the cash amount (FR-DEL-7.3); otherwise only prepaid offers are shown.
+The distance from rider to restaurant is within search_radius_m.
+8.3 Matching and Offer Flow
+The ranking function at the pilot is distance first, with a small penalty for riders who recently declined or timed out. Distance is straight-line (haversine) because road routing services cost money; it is good enough for a 3 km corridor and is replaced by routed distance only if it proves misleading in practice.
+8.4 Atomic Acceptance
+In the pool several riders can tap Accept within the same second. Exactly one must win. The decision is made by the database, not by application code:
+UPDATE dispatch.offers
+   SET status = 'ACCEPTED', accepted_at = now()
+ WHERE id = $1 AND status = 'OFFERED' AND expires_at > now()
+RETURNING order_id;
+
+-- unique partial index guarantees one accepted offer per order
+CREATE UNIQUE INDEX one_accepted_offer_per_order
+  ON dispatch.offers (order_id) WHERE status = 'ACCEPTED';
+The loser receives 409 and the app shows This order was taken. Acceptance from the lock screen uses the same endpoint (FR-DEL-3.4). The rider app treats a replayed acceptance with the same idempotency key as the same decision.
+8.5 Geo Index
+8.5.1 In-Memory Implementation (Pilot)
+The in-memory index keeps the last known point of each online rider in a map keyed by rider id and answers nearest-rider queries with a linear scan and the haversine formula. For 1,000 riders this is a few thousand arithmetic operations per query, far below one millisecond of CPU, so a dedicated spatial structure is unnecessary. Entries older than 90 seconds are ignored. Nothing is written to Redis or to PostgreSQL for ordinary pings (ADR-004).
+8.5.2 Redis Implementation (Scale Path)
+When a second backend instance is needed, GeoIndexPort is bound to a Redis implementation (GEOADD and GEOSEARCH) and WebSocket fan-out is bridged through Redis publish and subscribe (GEO_INDEX=redis). Because the free Upstash plan limits commands, the adapter batches location updates to one command per rider every 15 to 30 seconds and is intended for a paid or self-hosted Redis.
+8.6 Location Ingestion and Tracking
+Aspect
+ | Design
+ | Reason
+ | Transmission
+ | Batched: while the WebSocket is open points are sent as they are sampled; otherwise queued and sent in one HTTPS request when connectivity returns
+ | Data usage under 5 MB per delivery (PR-09)
+ | Payload
+ | Array of compact tuples (timestamp, latitude, longitude, accuracy, speed), about 20 bytes each before compression
+ | Low data
+ | Server use
+ | Latest point updates the in-memory index; points are not persisted unless the rider has an active delivery
+ | Storage and privacy
+ | Persistence during delivery
+ | Down-sampled to at most one breadcrumb per 30 s into dispatch.location_breadcrumbs
+ | Dispute evidence (FR-ADM-05) with bounded storage
+ | Customer tracking
+ | Server-Sent Events stream of the rider’s latest point, throttled to one update every 5 s, started only when the order is OUT_FOR_DELIVERY
+ | Battery and bandwidth on the customer phone; privacy
+ | 8.7 Delivering Offers to Locked Phones
+The requirement is that an offer rings like a call and can be accepted from the lock screen (FR-DEL-3.1, 3.4, NFR-24). The design combines three layers so that at least one works on every device.
+Foreground: a WebSocket message opens the full-screen offer with countdown and slide-to-accept.
+Background or killed app (Android): a high-priority FCM data message wakes the app, which posts a notification on a dedicated high-importance channel with a looping ringtone and vibration and Accept and Decline actions. Where the operating system allows it, the notification uses a full-screen intent so the offer screen appears over the lock screen.
+Fallback: a standard high-importance notification with the same actions and a sound, which works even when full-screen intents are not permitted.
+Two risks apply. Recent Android versions restrict full-screen intents to calling and alarm apps unless the user grants permission, so the team must check the current Play Console policy or accept the fallback layer. Battery-saving modes on budget handsets delay background pushes, so onboarding guides riders to exempt the app from battery optimisation and the pilot measures the 99 per cent within 5 seconds target (NFR-24) on real test devices (Chapter 17).
+8.8 Offer Expiry and Timers
+Each offer has an expires_at timestamp stored in the database. A delayed job (pg-boss, scheduled for expires_at) marks the offer EXPIRED and starts the next round; a periodic sweep every 10 seconds repairs any job that was lost. Both are idempotent: they only act on rows still in OFFERED. Offer timers never live only in memory, so a backend restart cannot leave an order without a rider.
+8.9 Reassignment, Rider Cancellation and Admin Override
+A rider who cancels after assignment (before pickup) returns the delivery to SEARCHING; the reason is recorded and the rider’s score is affected.
+An administrator can reassign an order from the dispute console (FR-ADM-05); the old assignment is closed, a new offer round starts and an audit entry is written in the same transaction.
+9. Delivery Agent Mobile App Design (Offline-First)
+The rider app decides whether the business works: riders who cannot complete a delivery without signal, who lose battery by noon or who see their phone freeze at cold start will leave (NN-3). The app is built with React Native (Expo development build, New Architecture, Hermes) and compiled to a native Android package; it is not a PWA (DC-06, NFR-56).
+9.1 Requirement-to-Design Map
+Requirement
+ | Design response
+ | PR-05 cold start
+ | Hermes bytecode, lazy-loaded map and camera screens, minimal start-up work, local data shown first
+ | PR-08 battery
+ | Adaptive GPS, no polling, push-driven offers, batched network, map re-render only after 50 m
+ | PR-09 data
+ | Compact payloads, batched pings, cached tiles, compressed photos
+ | NFR-54 size
+ | Android App Bundle with ABI splits, no large SDKs, assets compressed, tiles downloaded on demand
+ | NFR-40 to 46 usability
+ | Large bottom-anchored controls, haptics and spoken prompts, wizard-style flow with auto-filled data
+ | NFR-21 crash-free
+ | Sentry crash reporting, defensive error boundaries, offline-safe code paths
+ | NFR-23 queue durability
+ | Writes go to SQLite in a transaction before any network call; app restart safe
+ | NFR-53 foreground service
+ | Foreground service of location type declared in the manifest; persistent notification
+ | 9.2 Technology Choices
+All are open source and free. Names are indicative and must be validated against the New Architecture and the current Expo SDK during the first sprint.
+Concern
+ | Library or approach
+ | Note
+ | Build and runtime
+ | Expo SDK with development builds (prebuild), Hermes
+ | Native modules allowed; Expo Go not used for the rider app
+ | Local database
+ | expo-sqlite (SQLite), optional SQLCipher encryption
+ | Source of truth for the active delivery and the command queue
+ | Background location
+ | expo-location with a task manager and a foreground service
+ | Task defined at app start; survives screen off
+ | Background sync
+ | Task manager background task plus sync on foreground and on connectivity change
+ | Best effort; the foreground path is authoritative
+ | Push
+ | expo-notifications with a dedicated high-importance channel
+ | Offer ringing (Chapter 8.8)
+ | Camera
+ | expo-camera or image picker plus image manipulator
+ | Resize to 1280 px longest side, JPEG quality about 70
+ | 9.3 Application Architecture
+
+The rule that makes the app offline-first: screens read only from the local store and write only by creating commands. The network is used by the sync engine, never by a screen.
+9.4 Local Database Schema
+-- SQLite on the rider device (illustrative)
+CREATE TABLE delivery (
+  id TEXT PRIMARY KEY,           -- server delivery id
+  order_ref TEXT NOT NULL,
+  status TEXT NOT NULL,          -- last server-confirmed or locally applied status
+  pickup_json TEXT NOT NULL,     -- restaurant name, point, phone
+  dropoff_json TEXT NOT NULL,    -- address, landmark note, plus code, point, customer phone
+  payment_method TEXT NOT NULL,  -- PREPAID or COD
+  cash_due INTEGER,              -- FCFA for COD
+  otp_salt TEXT, otp_hash TEXT,  -- for local UX check only
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE command_queue (
+  id TEXT PRIMARY KEY,           -- client action id (UUID), also the idempotency key
+  delivery_id TEXT,
+  type TEXT NOT NULL,            -- ARRIVE_PICKUP, CONFIRM_PICKUP, ARRIVE_DROPOFF, COMPLETE, FAIL, CORRECT_PIN, ...
+  payload_json TEXT NOT NULL,
+  occurred_at INTEGER NOT NULL,  -- device time when the rider acted
+  seq INTEGER NOT NULL,          -- order within the delivery
+  status TEXT NOT NULL,          -- PENDING, SENDING, SYNCED, FAILED, CONFLICT
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at INTEGER
+);
+
+CREATE TABLE artifact (
+  id TEXT PRIMARY KEY,
+  command_id TEXT NOT NULL,
+  kind TEXT NOT NULL,            -- PHOTO, SIGNATURE
+  local_uri TEXT NOT NULL,
+  bytes INTEGER, checksum TEXT,
+  status TEXT NOT NULL,          -- PENDING, UPLOADING, SYNCED, FAILED
+  remote_key TEXT
+);
+
+CREATE TABLE location_buffer (ts INTEGER, lat REAL, lng REAL, acc REAL, speed REAL, sent INTEGER DEFAULT 0);
+CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT);   -- last_sync_at, remote config, wallet snapshot
+After a delivery is fully synced, personal data of the customer (phone, address, landmark note) is purged from the device, keeping only the earnings record (NFR-13).
+9.5 Command Queue and Sync Protocol
+9.5.1 Rules
+A rider action first writes a command row (and its artifacts) to SQLite in one transaction, then updates the local delivery status, then returns control to the screen. The screen never waits for the network.
+Commands for the same delivery are sent strictly in seq order; commands of different deliveries are independent.
+Photos and signatures are uploaded first, directly to object storage through a short-lived signed URL obtained from the API; the command then references the stored object key. An interrupted upload resumes from the saved status.
+Each request carries the command id as Idempotency-Key and the device occurrence time in the body; the server stores both the occurrence time and the receipt time.
+Failures use exponential backoff with jitter (for example 5 s, 15 s, 1 min, 5 min, then every 15 min) while the app is in the foreground or the background task runs; the rider can force Retry at any time (FR-DEL-6.5).
+A permanent server rejection (for example the order was cancelled by an administrator) marks the command CONFLICT with the server’s message; the app shows it clearly (NFR-46) and offers Contact Support.
+9.6 Offline Behaviour of Each Action
+Action (SRS)
+ | Offline behaviour
+ | Stored locally
+ | Server rule on replay
+ | Accept offer (FR-DEL-3.4)
+ | Requires connectivity: the offer is a live competition
+ | Nothing
+ | Atomic acceptance (Chapter 8.4)
+ | Arrived and Confirm pickup (FR-DEL-5.1)
+ | Applied locally immediately
+ | Command with occurred_at
+ | Valid only if the delivery is still assigned to this rider
+ | Pin correction (FR-DEL-4.5)
+ | Applied locally
+ | Command with new point
+ | Stored as a PinCorrection (Chapter 5.4)
+ | Photo POD (FR-DEL-6.1)
+ | Captured, compressed, stored with geotag and timestamp
+ | Artifact file and row
+ | Accepted once per client action id
+ | Cash collection (FR-DEL-6.4)
+ | Rider confirms the amount collected
+ | Command with amount
+ | Compared with cash_due; discrepancy flagged
+ | Complete delivery (FR-DEL-5.1)
+ | Blocked until POD exists locally
+ | Command COMPLETE
+ | Needs POD; wallet posted then
+ | Failure report (FR-DEL-5.2)
+ | Reason code and note
+ | Command FAIL
+ | Moves delivery to FAILED
+ | Wallet top-up, withdrawal (FR-DEL-7.3, 7.4)
+ | Requires connectivity: money movement
+ | Nothing
+ | Idempotent and reconciled (Chapter 7)
+ | 9.6.1 Offline OTP Verification
+The 4-digit delivery OTP is generated by the server when the order is accepted and is shown to the customer in the customer app and by push (ADR-007). The rider app receives a salted hash of the code with the delivery so that it can give instant feedback without a network. A 4-digit code has only 10,000 possibilities, so the local hash can be brute-forced by a malicious device; therefore the local check is only a usability aid. The rider enters the code, the app records it in the COMPLETE command, and the server performs the authoritative comparison on sync. A mismatch moves the delivery to a review state and holds the payout until an administrator resolves it. The app limits local attempts to three and logs them, and fraud rules flag riders with repeated mismatches.
+9.7 Adaptive Location Service
+Battery tactics (CT-2): use distance filters so the radio sleeps when the rider is still; raise accuracy only during active delivery; never poll the server (the server pushes); coalesce all pending uploads into one request per wake-up; reduce map redraws to movements above 50 m (PR-10); dim and simplify the map style; avoid wake locks outside the foreground service.
+9.8 Navigation and Address Handling
+Turn-by-turn through deep link: the Navigate button opens an installed navigation app with the pin as destination; the Plus Code is displayed and copyable as a fallback (FR-DEL-4.4). This avoids routing fees and navigation SDK licences.
+In-app map: MapLibre shows the rider, restaurant and customer pins on self-hosted tiles; the Buea corridor region is downloaded when the rider first goes online on Wi-Fi so that it works offline (FR-DEL-4.6).
+9.9 On-Device Security
+Access and refresh tokens are kept in secure storage; they are never written to SQLite or logs.
+The local database can be encrypted when the SQLCipher option of the SQLite module is confirmed to work with the chosen SDK; otherwise personal data is minimised and purged after sync (NFR-13).
+Biometric confirmation is required for withdrawals, wallet top-ups and COD above a configurable value (NFR-10).
+10. Customer, Merchant and Admin Client Design
+10.1 Customer Applications (Web and Mobile)
+The customer has two interfaces that must follow the same business rules (SRS 2.5, NFR-50): a Next.js web application and a React Native mobile application. Each is its own repository. Both generate their API types from the OpenAPI document (the single source of truth, browsable in Swagger UI) published by resto-api, each carries its own typed API client (idempotency keys, retry) and each keeps its own copy of the English and French dictionaries. They do not share screens, because web and native layouts differ, but both follow the same navigation map and states.
+Aspect
+ | Customer web (Next.js)
+ | Customer mobile (React Native)
+ | Hosting
+ | Cloudflare Workers via OpenNext (ADR-003)
+ | Android and iOS packages through EAS or local builds
+ | Rendering
+ | Static shell with client-side data fetching; server rendering only for public landing and restaurant pages that can be cached (Workers free CPU limit is 10 ms)
+ | Native screens; data through its own typed API client
+ | Session
+ | httpOnly, secure, same-site cookie holding the refresh token; short-lived access token in memory
+ | Refresh token in secure storage; access token in memory
+ | Offline
+ | Read-only cache of recent restaurants and menus (service worker optional); checkout requires connectivity
+ | Cached lists and last orders; checkout requires connectivity
+ | Tracking
+ | Server-Sent Events with polling fallback every 15 s
+ | SSE while foregrounded, push notifications otherwise
+ | Payments
+ | Phone number entry, USSD or app prompt approval on the phone
+ | Same, with a deep link to the operator app where available
+ | 10.1.1 Cart and Restaurant-Switch Flow
+The one-restaurant rule is enforced in three places: the interface prevents the action, the cart service rejects it, and checkout validates it again (NFR-32). The cart lives on the server so that it survives sessions and devices (FR-CUS-31); the client keeps an optimistic copy.
+The switch endpoint is one transaction, so a failure cannot leave a half-cleared cart. Clearing a cart never deletes historical orders or payment records (FR-CUS-15 (g)).
+10.2 Merchant Dashboard
+The dashboard is a responsive Next.js application designed first for tablets and smartphones in a kitchen (NFR-37, NFR-51).
+The order board reconnects automatically and, after a gap, fetches missed orders by sequence number so that no order is lost while the tablet was offline (NFR-20). New orders raise an audible and visual alert over Server-Sent Events, plus a web push when the tab is in the background; unanswered orders time out; every status change is a command with an idempotency key; marking an item unavailable removes it from customer menus at once.
+10.3 Administrative Dashboard
+The dashboard is a separate Next.js application with its own origin, cookie scope and security headers (Chapter 13).
+The SRS describes administrators as a single group; the design splits the permission set so that the principle of least privilege applies (NFR-01). A super administrator can assign roles.
+Role
+ | Permissions
+ | SUPER_ADMIN
+ | All; manages admin accounts and platform settings
+ | VERIFIER
+ | Merchant and rider applications; document viewing (FR-ADM-01, 02)
+ | SUPPORT
+ | Account lookup, status changes except permanent ban, content moderation, dispute viewing (FR-ADM-03, 04)
+ | FINANCE
+ | Refunds, wallet adjustments, reconciliation reports, payouts (FR-ADM-05)
+ | ANALYST
+ | Read-only analytics (FR-ADM-06)
+ | 10.4 Real-Time Channels
+Channel
+ | Technology
+ | Clients
+ | Notes
+ | Offers and rider commands
+ | WebSocket
+ | Rider app
+ | Heartbeat tuned for battery; reconnect with backoff; offers also sent by push
+ | Order status and tracking
+ | Server-Sent Events
+ | Customer web and mobile
+ | One-way; automatic reconnection with Last-Event-ID so missed events replay
+ | Order board
+ | Server-Sent Events
+ | Merchant dashboard
+ | Replay by sequence number after a gap
+ | Admin live view
+ | Server-Sent Events
+ | Admin dashboard
+ | Subscribed only while the dispute console is open
+ | SSE is chosen for one-way streams because it runs over plain HTTP, reconnects by itself and is cheaper in battery and connections than WebSocket for passive viewers. WebSocket is reserved for the rider app, where two-way, low-latency messaging matters.
+11. Data Design
+11.1 Principles
+One PostgreSQL database with one schema per module (identity, catalog, cart, ordering, payments, dispatch, delivery, notifications, support, admin, analytics, platform). A module reads another module’s data only through its public interface or through events (Chapter 4.1).
+Constraints in the database repeat the most important invariants of Chapter 5.3, so a bug in application code cannot corrupt financial data.
+Financial and audit tables are append-only. State tables carry a version column.
+11.2 Entity-Relationship Diagram
+The diagram shows the core tables across modules. Columns are limited to keys and the most important attributes.
+
+11.3 Key Constraints
+The constraints that carry the design are listed in Chapter 5.3; the ledger is append-only and balanced by a deferred constraint trigger and revoked UPDATE and DELETE privileges (Chapter 7.4). Full migrations live in the migrations folder of the resto-api repository.
+The audit table’s uneditable property (NFR-11) rests on three independent layers: privileges (the application role cannot update or delete), triggers (even a privileged session is rejected) and process (no administrative interface offers editing). A hash chain, where each row stores the hash of the previous row, can be added later to make tampering detectable even by a database owner.
+11.4 Indexing Plan
+Query
+ | Index
+ | Used by
+ | Merchant order board by status
+ | orders (restaurant_id, status, created_at desc)
+ | FR-MER-05, 06
+ | Customer order history
+ | orders (customer_id, created_at desc)
+ | FR-CUS-24
+ | Restaurants near a point
+ | PostGIS GiST index on restaurants.location, or a bounding-box index at the pilot
+ | FR-CUS-06, 07
+ | Menu of a restaurant
+ | menu_items (category_id, sort_order) with partial index on available
+ | FR-CUS-09
+ | Outbox relay
+ | outbox (published_at) WHERE published_at IS NULL
+ | Chapter 6.5
+ | Reconciliation queue
+ | payments (state, next_check_at) WHERE state IN ('PENDING','UNKNOWN')
+ | Chapter 7.3
+ | Offers to expire
+ | offers (expires_at) WHERE status = 'OFFERED'
+ | Chapter 8.9
+ | Idempotency cleanup
+ | idempotency_keys (expires_at)
+ | Chapter 6.4
+ | Audit search
+ | audit_log (admin_id, at desc) and (target_type, target_id)
+ | NFR-11
+ | 11.5 Migrations, ORM and Seed Data
+Migrations: versioned SQL files applied by a migration tool in CI before each deployment, forward-only, tested against a disposable database in the pipeline.
+Data access: a typed query layer (Drizzle ORM or Kysely) used inside the repository layer of each module, with hand-written SQL for the critical statements shown in this document; repositories receive the transaction handle from the service and never hide transaction boundaries (ADR-011 in Chapter 18).
+11.6 Retention and Purge Rules
+Data
+ | Retention (proposed)
+ | Reason
+ | Job
+ | Location breadcrumbs
+ | 30 days, longer only if attached to a dispute
+ | NFR-15; storage budget
+ | Nightly purge
+ | Idempotency keys
+ | 24 h online, 30 days rider
+ | Replay window
+ | Hourly cleanup
+ | Outbox and processed events
+ | 14 days after publication
+ | Storage
+ | Nightly purge
+ | POD photos
+ | 90 days, longer if disputed
+ | Storage budget; dispute window
+ | Lifecycle rule on R2
+ | KYC documents
+ | Duration of the account plus a legal retention period to be confirmed
+ | NFR-16; OD-13
+ | Manual review at account closure
+ | Notifications
+ | 90 days
+ | Support
+ | Nightly purge
+ | Orders, payments, ledger
+ | Legal accounting period (confirm with an accountant)
+ | Financial records
+ | Not purged; archived to cold storage when large
+ | Audit log
+ | Not purged
+ | NFR-11
+ | None
+ | Customer personal data after account deletion
+ | Anonymised while financial records keep pseudonymous keys
+ | Data-protection law (Chapter 14)
+ | On request
+ | 11.7 Backup and Recovery
+A scheduled GitHub Actions workflow runs a nightly logical dump, compresses and encrypts it and uploads it to a private R2 bucket; the last 14 daily and 8 weekly dumps are kept.
+A restore drill into a scratch database is performed monthly and its result recorded; an untested backup is treated as no backup.
+Targets (proposed): recovery point objective 24 hours on the free setup, reduced to minutes when the paid database plan with longer history is adopted; recovery time objective 4 hours (NFR-30).
+12. API Design
+12.1 Conventions
+Topic
+ | Rule
+ | Style
+ | REST over HTTPS, JSON bodies, base path /v1; resource nouns, plural; actions that are not CRUD use a verb sub-resource (for example POST /orders/{id}/cancel)
+ | Authentication
+ | Authorization: Bearer access token on every route except registration, login, public catalogue reads and provider webhooks
+ | Idempotency
+ | Idempotency-Key header (UUID) required on every POST, PUT, PATCH and DELETE (FR-SYS-02, Chapter 6.4)
+ | Contract
+ | Request and response schemas are zod schemas in resto-api; the OpenAPI 3.1 document generated from them is the single source of truth for all repositories, served through Swagger UI at /docs and published with each release for the five client repositories to consume
+ | Money
+ | Integer FCFA in fields named amount, total, fee; never decimals
+ | Time
+ | ISO 8601 UTC strings; the rider app also sends occurred_at for offline actions
+ | Pagination
+ | Cursor-based: limit (default 20, maximum 100) and cursor; response has items and nextCursor
+ | Errors
+ | RFC 9457 problem details (application/problem+json) with a stable code, a requestId and field errors; internal details never exposed (NFR-39)
+ | Rate limits
+ | Per IP and per account; 429 with Retry-After; stricter on authentication and OTP routes
+ | Client version gate
+ | X-App-Version header; below the minimum version configured remotely, the API answers 426 Upgrade Required (riders update slowly, so old versions must be tolerated for a defined window)
+ | 12.2 Error Catalogue
+Code
+ | HTTP
+ | Meaning
+ | Client behaviour
+ | VALIDATION_FAILED
+ | 400
+ | Body or query failed schema validation; field errors listed
+ | Show field messages
+ | IDEMPOTENCY_KEY_REQUIRED
+ | 400
+ | Mutating request without key
+ | Client bug; add key
+ | UNAUTHENTICATED
+ | 401
+ | Missing or expired token
+ | Refresh token or sign in
+ | FORBIDDEN
+ | 403
+ | Role or ownership check failed
+ | Show not allowed
+ | NOT_FOUND
+ | 404
+ | Resource missing or not visible to the caller
+ | Show not found
+ | RESTAURANT_MISMATCH
+ | 409
+ | Item belongs to a restaurant other than the cart’s
+ | Show switch warning (FR-CUS-13)
+ | ITEM_UNAVAILABLE
+ | 409
+ | Item or option unavailable
+ | Refresh menu; explain
+ | PRICE_CHANGED
+ | 409
+ | Prices differ from the cart
+ | Show updated total for approval
+ | RESTAURANT_CLOSED
+ | 409
+ | Restaurant not accepting orders
+ | Disable checkout (FR-CUS-06)
+ | ORDER_STATE_CONFLICT
+ | 409
+ | Transition not allowed from the current state or version
+ | Re-read and show message
+ | OFFER_TAKEN
+ | 409
+ | Offer expired or accepted by another rider
+ | Dismiss offer
+ | REQUEST_IN_PROGRESS
+ | 409
+ | Same key still running
+ | Wait and retry
+ | IDEMPOTENCY_KEY_REUSED
+ | 422
+ | Same key with a different body
+ | Client bug
+ | PAYMENT_UNKNOWN
+ | 202
+ | Outcome not yet known; reconciliation running
+ | Show Confirming your payment
+ | WALLET_INSUFFICIENT
+ | 422
+ | Not enough available balance
+ | Prompt top-up
+ | RATE_LIMITED
+ | 429
+ | Too many requests
+ | Back off
+ | UPGRADE_REQUIRED
+ | 426
+ | App version below minimum
+ | Prompt update
+ | INTERNAL
+ | 500
+ | Unexpected error; requestId returned
+ | Retry with backoff; keep queued commands
+ | 12.3 Endpoint Catalogue
+Paths are indicative; the generated OpenAPI document (Swagger UI) is the authoritative list. The Idem column shows whether the Idempotency-Key header is required.
+12.3.1 Identity
+Method and path
+ | Actor
+ | Purpose
+ | Idem
+ | POST /auth/register
+ | Customer, merchant
+ | Create account
+ | Yes
+ | POST /auth/login
+ | All
+ | Credentials to tokens
+ | Yes
+ | POST /auth/refresh
+ | All
+ | Rotate refresh token
+ | Yes
+ | POST /auth/logout
+ | All
+ | Revoke session
+ | Yes
+ | POST /auth/password/forgot, POST /auth/password/reset
+ | Customer, merchant
+ | Recovery by email link
+ | Yes
+ | POST /auth/admin/mfa/verify
+ | Admin
+ | TOTP verification
+ | Yes
+ | POST /riders/otp/request, POST /riders/otp/verify
+ | Rider
+ | OTP sign-up
+ | Yes
+ | GET and PATCH /me
+ | Customer
+ | Profile
+ | PATCH
+ | GET, POST, PATCH, DELETE /me/addresses
+ | Customer
+ | Saved addresses with landmark note
+ | Mutations
+ | 12.3.2 Catalogue (Public and Merchant)
+Method and path
+ | Actor
+ | Purpose
+ | Idem
+ | GET /restaurants
+ | Public
+ | List, search, filter by cuisine, location, availability
+ | No
+ | GET /restaurants/{id}
+ | Public
+ | Restaurant details and service conditions
+ | No
+ | GET /restaurants/{id}/menu
+ | Public
+ | Categories, items, options, availability; supports search parameter
+ | No
+ | PATCH /merchant/restaurants/{id}
+ | Merchant
+ | Update restaurant information and open or paused state
+ | Yes
+ | POST, PATCH, DELETE /merchant/menu/items
+ | Merchant
+ | Manage items, prices, option groups
+ | Yes
+ | PATCH /merchant/menu/items/{id}/stock
+ | Merchant, staff
+ | Update stock
+ | Yes
+ | POST, PATCH /merchant/promotions
+ | Merchant
+ | Discounts
+ | Yes
+ | POST, DELETE /merchant/staff
+ | Merchant
+ | Staff and roles
+ | Yes
+ | 12.3.3 Cart and Ordering
+Method and path
+ | Actor
+ | Purpose
+ | Idem
+ | GET /cart
+ | Customer
+ | Active cart with totals
+ | No
+ | PUT /cart/items
+ | Customer
+ | Add or change item; returns RESTAURANT_MISMATCH when needed
+ | Yes
+ | DELETE /cart/items/{id}, DELETE /cart
+ | Customer
+ | Remove item, clear cart
+ | Yes
+ | POST /cart/switch
+ | Customer
+ | Confirm restaurant switch (clear and add)
+ | Yes
+ | POST /checkout
+ | Customer
+ | Revalidate cart and create order and payment
+ | Yes
+ | GET /orders, GET /orders/{id}
+ | Customer
+ | History and details
+ | No
+ | GET /orders/{id}/stream
+ | Customer
+ | SSE status and tracking
+ | No
+ | POST /orders/{id}/cancel
+ | Customer
+ | Cancel where permitted
+ | Yes
+ | GET /payments, GET /payments/{id}/receipt
+ | Customer
+ | Payment history and receipts
+ | No
+ | POST /orders/{id}/review
+ | Customer
+ | Rating and feedback
+ | Yes
+ | GET /merchant/orders, GET /merchant/orders/stream
+ | Merchant, staff
+ | Order board and live stream
+ | No
+ | POST /merchant/orders/{id}/accept, reject, preparing, ready
+ | Merchant, staff
+ | State actions
+ | Yes
+ | GET /merchant/payments, sales, reports
+ | Merchant
+ | Payments, sales, report jobs
+ | No
+ | 12.3.4 Rider, Dispatch and Delivery
+Method and path
+ | Actor
+ | Purpose
+ | Idem
+ | POST /rider/kyc, GET /rider/verification
+ | Rider
+ | Documents and status
+ | Yes
+ | PUT /rider/profile/vehicle, POST /rider/consent
+ | Rider
+ | Vehicle and consent
+ | Yes
+ | PUT /rider/availability
+ | Rider
+ | Online or Offline
+ | Yes
+ | WebSocket /rider/stream
+ | Rider
+ | Offers, config, location batches
+ | n/a
+ | POST /rider/offers/{id}/accept, decline
+ | Rider
+ | Respond to offer
+ | Yes
+ | POST /rider/uploads
+ | Rider
+ | Signed URL for artifacts
+ | Yes
+ | POST /rider/sync
+ | Rider
+ | Batch of queued commands in order
+ | Per command
+ | POST /rider/deliveries/{id}/commands
+ | Rider
+ | Single command (arrive, pickup, complete, fail, correct pin)
+ | Yes
+ | POST /rider/locations
+ | Rider
+ | Batched location points over HTTPS
+ | Yes
+ | GET /rider/wallet, /rider/earnings, /rider/runs
+ | Rider
+ | Wallet and earnings
+ | No
+ | POST /rider/wallet/topups, POST /rider/wallet/withdrawals
+ | Rider
+ | Money movement with step-up
+ | Yes
+ | POST /rider/support, POST /rider/incidents
+ | Rider
+ | Support and safety
+ | Yes
+ | GET /rider/config
+ | Rider
+ | Remote configuration
+ | No
+ | 12.3.5 Administration and Platform
+Method and path
+ | Actor
+ | Purpose
+ | Idem
+ | GET /admin/applications, GET /admin/applications/{id}/documents/{docId}/url
+ | Verifier
+ | Queue and signed document URL
+ | No
+ | POST /admin/applications/{id}/decision
+ | Verifier
+ | Approve or reject with note
+ | Yes
+ | GET /admin/users, PATCH /admin/users/{id}/status, POST /admin/users/{id}/credential-reset
+ | Support
+ | Account management
+ | Mutations
+ | GET /admin/moderation, POST /admin/moderation/{id}/action
+ | Support
+ | Moderation
+ | Yes
+ | GET /admin/orders/{id}/timeline, GET /admin/orders/{id}/stream
+ | Support, finance
+ | Logs and live location
+ | No
+ | POST /admin/orders/{id}/refund, reassign; POST /admin/wallets/{id}/adjust
+ | Finance
+ | Overrides
+ | Yes
+ | GET /admin/analytics
+ | Analyst
+ | KPIs
+ | No
+ | GET and PUT /admin/settings
+ | Super admin
+ | Global parameters
+ | PUT
+ | GET /admin/reconciliation
+ | Finance
+ | UNKNOWN payments and settlement differences
+ | No
+ | GET /admin/audit
+ | Super admin
+ | Audit log
+ | No
+ | POST /webhooks/payments/{provider}
+ | Provider
+ | Payment and payout events
+ | By event id
+ | GET /health, GET /ready
+ | Monitor
+ | Liveness and readiness
+ | No
+ | 12.4 Example Exchange
+POST /v1/checkout
+Authorization: Bearer <access token>
+Idempotency-Key: 0192f6c4-7a53-7c3e-9d41-1c2b9a5e8f10
+Content-Type: application/json
+
+{
+  "cartId": "0192f6c0-...",
+  "cartVersion": 4,
+  "fulfilment": "DELIVERY",
+  "addressId": "0192f5aa-...",
+  "payment": { "method": "ONLINE", "channel": "cm.mtn", "phone": "+237670000000" }
+}
+
+HTTP/1.1 201 Created
+{
+  "orderId": "0192f6c4-...",
+  "reference": "RST-24A9F1",
+  "status": "PENDING_PAYMENT",
+  "total": 6500,
+  "payment": { "id": "0192f6c4-...", "state": "PENDING" }
+}
+12.5 Rider WebSocket Protocol
+Every message is a JSON envelope with a type, an id and a sequence number. The rider app acknowledges messages that matter (offers) and, after a reconnect, sends its last received sequence number so that missed messages are replayed.
+Direction
+ | Type
+ | Content
+ | Notes
+ | Server to rider
+ | offer.created
+ | Offer id, earnings, distances, payment type, expiry time
+ | Rings the phone (Chapter 8.8)
+ | Server to rider
+ | offer.closed
+ | Offer id and reason (taken, expired, cancelled)
+ | Removes the offer card
+ | Server to rider
+ | delivery.updated
+ | Delivery id and new status, for example admin reassignment or cancellation
+ | Applied to local state
+ | Server to rider
+ | config.updated
+ | Changed remote configuration values
+ | NFR-62
+ | Server to rider
+ | ping
+ | Heartbeat
+ | Interval tuned for battery
+ | Rider to server
+ | location.batch
+ | Array of points with timestamps
+ | PR-07
+ | Rider to server
+ | ack
+ | Message id
+ | Confirms offer receipt (NFR-24 measurement)
+ | Rider to server
+ | pong
+ | Heartbeat reply
+ |
+ | 12.6 Inbound Provider Webhooks
+The route is public but the handler verifies the provider’s signature on the raw body before parsing.
+The event is recorded in a webhook_events table with a unique (provider, event id) constraint; a duplicate returns 200 immediately.
+The handler never trusts the event to change state: it enqueues a job that queries the provider for the status of the referenced transaction and then applies the result through the payment state machine (Chapter 7.2).
+13. Security Design
+13.1 Authentication Design
+Passwords: Argon2id with parameters at or above the current OWASP minimum recommendation, tuned on the production host; a pepper stored as an environment secret is optional.
+Tokens: access token about 15 minutes, signed with an asymmetric key so that other services can verify without the secret; refresh token random, stored hashed, rotated on every use, family revoked on reuse (NFR-04, FR-CUS-32).
+Riders: phone and OTP at sign-up (FR-DEL-1.1, NFR-09), then token-based sessions bound to a device identifier; new device requires OTP again; biometric confirmation for money actions (NFR-10).
+Administrators: password plus TOTP; recovery codes stored hashed; sessions of at most a few hours; step-up authentication (fresh TOTP within five minutes) for ban, refund, wallet adjustment and settings changes (NFR-01).
+Brute-force control: per account and per IP counters with exponential lockout; CAPTCHA only after repeated failures, using a free challenge service.
+13.2 Authorisation Design
+Authorisation is deny-by-default: each route declares the roles allowed and the ownership rule; a missing declaration fails the build.
+Resource
+ | Rule
+ | Cart, address, order, payment, favourites
+ | The record’s customer id equals the caller (NFR-04)
+ | Restaurant, menu, orders of a restaurant
+ | Caller is the owner, or staff of that restaurant with a role permitting the action
+ | Delivery and offers
+ | Caller is the assigned rider (or the offered rider for an offer)
+ | Rider wallet
+ | Caller is the wallet owner; admin finance role for adjustments
+ | Documents
+ | Verifier role; every access logged
+ | Settings and audit
+ | Super admin only
+ | 13.3 Transport, Headers and Origins
+TLS terminates at Cloudflare and at the backend host; the backend refuses plain HTTP and the rider app rejects invalid certificates (NFR-03).
+HSTS, a strict Content-Security-Policy, X-Content-Type-Options, Referrer-Policy and frame-ancestors none are set on all web apps; the admin app has the strictest policy and its own origin.
+Cookies are httpOnly, secure and same-site; CSRF tokens protect cookie-authenticated mutations.
+13.4 Data Protection
+Encryption at rest is provided by the database and object storage providers; the team must confirm this in each provider’s documentation and record it in the compliance file (NFR-03).
+KYC documents and ID photos receive an additional application-level encryption layer using per-object data keys wrapped by a master key held as a secret, so that a bucket leak alone does not expose them.
+Secrets live in the hosting provider’s secret store and in GitHub encrypted secrets, never in the repository; each environment has separate keys; rotation is documented and rehearsed.
+Logs never contain tokens, passwords, OTPs, full phone numbers or addresses; a redaction filter enforces this (NFR-13).
+13.5 Fraud and Abuse Controls
+Actor
+ | Signal
+ | Response
+ | Rider
+ | POD photo taken far from the drop-off pin (beyond a configurable tolerance)
+ | Flag; payout held for review
+ | Rider
+ | Implausible speed between pings (GPS spoofing)
+ | Flag; admin alert
+ | Rider
+ | Repeated OTP mismatches
+ | Review state; suspension rules
+ | Rider
+ | Same photo hash used on different deliveries
+ | Reject and flag
+ | Customer
+ | Repeated COD no-shows
+ | Require online payment for the account
+ | Merchant
+ | Orders rejected or ignored repeatedly
+ | Visibility reduced; admin notified
+ | Any
+ | Many failed payments from one account or device
+ | Rate limit and temporary block
+ | 14. Regulatory and Data-Protection Compliance Design
+Non-negotiable NN-1 requires ART/ANTIC certification and NECAP interconnection before the first live transaction. This chapter turns that obligation, and the data-protection obligations that apply to a platform handling addresses, phone numbers, identity documents and location, into design elements. It is an engineering view, not legal advice: every item marked to confirm must be checked with a lawyer or the competent authority before launch.
+14.1 Live-Mode Regulatory Gate
+The platform setting regulatory.live_mode defaults to false in production. While it is false, checkout, payouts and wallet top-ups run only against the payment sandbox and orders are marked as test orders. Live mode can be enabled only by the super administrator when all three compliance flags are set, and the change is audited.
+The gate is enforced in the payments module and in the dispatch module (not only in the interface), so a misconfigured client cannot bypass it (FR-SYS-08).
+14.2 NECAP and ART Reporting Design
+The RegulatorReportPort receives a ReportableEvent after each definite payment outcome, payout, refund and SMS sent.
+Events are written to a regulator_outbox table in the same transaction as the business change, then delivered by a worker with retry and backoff, so a regulator outage never blocks an order but never loses a report either.
+The proposed payload fields are: event type, platform transaction reference, provider reference, amount, currency, channel, timestamp, and a pseudonymous party identifier; the final format is dictated by the regulator.
+14.3 Data Subject Rights and Consent
+Consent and notices: the privacy notice and terms are versioned documents (FR-CUS-33); acceptance of a version, with time and app version, is stored per user. Riders accept data-processing consent before activation (FR-DEL-1.4); merchants accept terms at registration.
+Deletion: deleting an account anonymises personal columns (name, email, phone, addresses) and keeps financial records under a pseudonymous key for the legal accounting period.
+Breach procedure: a written procedure defines detection, triage, containment, notification of the authority and affected users within the period set by law (until confirmed, assume 72 hours), and a post-incident review.
+14.4 Cross-Border Processing
+Every managed service in the free stack runs outside Cameroon. The law restricts transfers of personal data abroad and expects authorisation or an adequate level of protection, so the design limits what leaves the country and documents the rest.
+Provider
+ | Personal data it may process
+ | Mitigation
+ | PostgreSQL host
+ | All transactional personal data
+ | Choose a European region (lowest latency to Cameroon among available regions); data-processing agreement; list in the authorisation request
+ | Object storage (R2)
+ | KYC documents, POD photos
+ | European location hint; application-level encryption; signed URLs only
+ | Backend host
+ | Data in transit and memory
+ | European region; no persistent personal data on disk
+ | Push service
+ | Push tokens, notification text
+ | Notification text avoids full addresses and phone numbers
+ | Crash reporting
+ | Device and error data
+ | Scrubbed of personal data before sending; user identifiers pseudonymous
+ | Payment aggregator
+ | Phone number and amount
+ | Required for the service; contract clauses; also regulated locally
+ | SMS gateway
+ | Phone number and message
+ | Required for the service
+ | 15. Observability, Configuration and Operations
+15.1 Logging
+Structured JSON logs (pino) with level, time, requestId, userId (pseudonymous), route, status, duration and, where relevant, orderId, deliveryId and paymentId, so that one order can be traced end to end.
+Hosting log retention on free plans is short; error events and security events are also sent to the error-tracking service and critical audit records are in the database.
+15.2 Metrics
+Metrics are collected in the application, aggregated hourly into a small metrics table and shown on an operations page of the admin dashboard; an external service with a free tier may be added later. Tracked: offer push latency p95 (PR-06); offers delivered within 5 s when backgrounded (NFR-24); offer acceptance rate and time to assignment; crash-free sessions (NFR-21); payments in UNKNOWN and the oldest age; daily reconciliation differences; COD cash exposure against held reserves; idempotent replays served; queue depth and oldest job age; rider sync lag (NFR-23); orders, GMV and commission; free-tier consumption. Targets are those of the SRS.
+15.3 Alerts
+Condition
+ | Severity
+ | Channel (free)
+ | Backend unreachable for 2 minutes
+ | Critical
+ | Telegram bot and email
+ | Any payment UNKNOWN for more than 1 hour
+ | High
+ | Telegram bot and admin dashboard
+ | Reconciliation difference found
+ | High
+ | Email and dashboard
+ | p95 offer latency above 2 s for 15 minutes
+ | High
+ | Telegram bot
+ | Queue oldest job older than 5 minutes
+ | Medium
+ | Email
+ | Mobile crash-free rate below 99.5% over a day
+ | Medium
+ | Email
+ | Free-tier consumption above 70%
+ | Low
+ | Email weekly digest
+ | Unsent regulator reports older than 1 hour
+ | High
+ | Email and dashboard
+ | 15.4 Remote Configuration and Feature Flags
+A platform.settings table holds versioned key-value settings and flags. Clients fetch them at start and when a config.updated message arrives, and keep safe defaults baked into the app so that they work offline (NFR-62, NFR-63). Keys include the dispatch and GPS parameters of Chapter 8.1, commission rates, the delivery fee formula (base, per kilometre, minimum, maximum), default radius, feature.cod_enabled (per neighbourhood, TD-01), feature.sms_fallback_enabled, regulatory.live_mode (Chapter 14.1), app.min_version (Chapter 12.1) and feature.new_flows.
+Every change requires a reason, is versioned and is audited; changes to commission, fees and regulatory keys require step-up authentication.
+15.5 Runbooks
+Short runbooks, kept in docs/runbooks, are part of the operational design:
+Payment stuck in UNKNOWN: check provider dashboard by reference; follow reconciliation steps; never refund or re-collect before a definite answer.
+Riders not receiving offers: check push provider status, WebSocket connection count, backend sleeping, rider battery-optimisation settings; fall back to phone calls and manual assignment from the admin console.
+Database nearing limits: run retention jobs, check pg-boss polling, pause workers outside operating hours, consider the paid plan.
+Backend down: Cloudflare maintenance page for web; riders continue offline; failover to Profile B or redeploy.
+16. Deployment, Environments and CI/CD
+16.1 Environments
+Environment
+ | Purpose
+ | Backend
+ | Database
+ | Web
+ | Payments
+ | Local
+ | Developer machines
+ | Node process
+ | PostgreSQL in Docker Compose
+ | next dev
+ | Mock provider
+ | Preview
+ | One per pull request
+ | Not deployed; tests run against CI services
+ | Ephemeral service container
+ | Cloudflare preview deployment
+ | Mock
+ | Staging
+ | Integration and pilot rehearsal
+ | Free hosting tier (Profile A)
+ | Separate database project or branch
+ | Cloudflare staging routes
+ | Aggregator sandbox
+ | Production
+ | Live service
+ | Always-on instance (Profile C)
+ | Production database project
+ | Cloudflare production routes
+ | Live only when regulatory.live_mode is true
+ | 16.2 Production Topology (Profile C)
+
+-6858006565900016.3 CI/CD Pipeline
+16.4 Mobile Release Strategy
+Concern
+ | Approach
+ | Pilot distribution
+ | Signed APK or Play internal testing track for riders; no store listing required during the closed pilot
+ | Store release
+ | Google Play closed then production track after the one-time developer registration; iOS later (secondary platform)
+ | Over-the-air updates
+ | JavaScript-only fixes through EAS Update (free plan covers up to 1,000 monthly active users); native changes need a store build
+ | Builds
+ | EAS Free cloud builds are low priority and limited per month; local builds are the fallback so a queue never blocks a hotfix
+ | Versioning
+ | Semantic version plus build number; X-App-Version sent on every request; minimum version enforced remotely (Chapter 12.1)
+ | Rollback
+ | OTA channel rollback to the previous update; feature flags disable a faulty feature without a new build (NFR-63)
+ | Signing
+ | Upload keys stored securely (Play App Signing recommended); keystore backups held by two team members
+ | 16.5 Database Migrations in Deployment
+Migrations run in CI before the new API version starts and are written to be backward compatible (expand, then migrate data, then contract in a later release) so that the old API version keeps working during the rollout.
+Destructive migrations require a fresh verified backup (Chapter 11.7) and a second reviewer.
+16.6 Configuration Reference
+Variable
+ | Used by
+ | Example or note
+ | DATABASE_URL
+ | API, workers, migrations
+ | Pooled connection string; separate per environment
+ | REDIS_URL
+ | API (optional)
+ | Empty means Redis features are disabled
+ | GEO_INDEX
+ | API
+ | memory or redis
+ | QUEUE
+ | API, workers
+ | pgboss
+ | WORKERS_IN_PROCESS
+ | API
+ | true at the pilot
+ | STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_KEY_ID, STORAGE_SECRET
+ | API
+ | R2 through the S3 API
+ | PAYMENT_PROVIDER, PAYMENT_API_KEY, PAYMENT_WEBHOOK_SECRET, PAYMENT_MODE
+ | API
+ | sandbox or live
+ | SMS_PROVIDER, SMS_API_KEY
+ | API
+ | Empty disables SMS
+ | JWT_PRIVATE_KEY, JWT_PUBLIC_KEY
+ | API
+ | Asymmetric signing keys
+ | DOC_ENCRYPTION_MASTER_KEY
+ | API
+ | Wraps per-object keys (Chapter 13.4)
+ | 17. Testing Strategy
+17.1 Test Levels
+Level
+ | Scope
+ | Tools
+ | Examples
+ | Unit
+ | Service logic, pure functions
+ | Vitest or Jest
+ | Cart invariants, fee formula, money split rounding, state transition table, Plus Code helpers
+ | Property-based
+ | Invariants over many generated inputs
+ | fast-check
+ | Any sequence of order commands never reaches an illegal state; ledger transactions always balance
+ | Integration
+ | Module with a real PostgreSQL
+ | Vitest with a CI service container
+ | Optimistic locking conflict; unique indexes; outbox relay; idempotency middleware
+ | Contract
+ | Client and server agree
+ | OpenAPI document from resto-api; client repos regenerate types and build against it; OpenAPI diff in CI
+ | Breaking changes detected before merge
+ | End to end web
+ | Customer, merchant, admin journeys
+ | Playwright
+ | Place order with sandbox payment; merchant accepts; admin approves a rider
+ | End to end mobile
+ | Rider and customer app flows
+ | Maestro (open source) on emulators
+ | Offer accept; offline completion; sync
+ | Provider sandbox
+ | Payment adapter
+ | Aggregator sandbox test numbers
+ | Success, insufficient funds, timeout, cancellation, duplicate webhook
+ | Performance
+ | Load and soak
+ | k6
+ | 1,000 simulated rider connections sending pings; 100 orders per hour
+ | Security
+ | Static and dynamic checks
+ | ZAP baseline, dependency audit, secret scan
+ | Authorisation matrix, injection attempts
+ | Accessibility
+ | Web and mobile
+ | axe in Playwright; manual TalkBack check
+ | WCAG 2.2 AA checks (NFR-38)
+ | Device lab
+ | Real low-end Android phones
+ | Manual protocol
+ | Cold start, battery, push in battery-saver mode
+ | 17.2 Critical Test Scenarios
+Scenario
+ | Expected result
+ | Requirement
+ | Send the same checkout request 50 times concurrently with one idempotency key
+ | One order, one payment, 49 replays
+ | FR-SYS-02, NFR-22
+ | Provider times out during collection
+ | Payment UNKNOWN; no refund; later reconciled to the true state
+ | FR-SYS-03, DC-05
+ | Provider webhook delivered three times and out of order
+ | One state change
+ | Chapter 7
+ | Merchant accept and customer cancel in the same millisecond
+ | One succeeds, one conflict
+ | Chapter 6.3
+ | Add item from another restaurant, then cancel the switch
+ | Cart unchanged
+ | FR-CUS-14, NFR-33
+ | Add item from another restaurant, then confirm
+ | Cart replaced atomically; history untouched
+ | FR-CUS-15
+ | Rider completes delivery in airplane mode, reconnects 40 minutes later
+ | One completion, wallet posted once, POD stored
+ | FR-DEL-6.4, 6.5, NFR-23
+ | App killed during queued upload
+ | Queue resumes at restart without loss
+ | NFR-23
+ | Two riders accept the same pooled offer
+ | One wins; the other sees order taken
+ | Chapter 8.4
+ | Rider app offered while screen locked and battery saver on
+ | Ring within 5 s on the reference devices
+ | NFR-24
+ | Wallet balance below COD amount
+ | No COD offers shown; prepaid still offered
+ | FR-DEL-7.3
+ | Admin refund
+ | Ledger entry and audit entry commit together; audit cannot be edited
+ | FR-ADM-05, NFR-11
+ | Attempt to update or delete an audit row as the application role
+ | Rejected by privileges and by trigger
+ | NFR-11
+ | Customer requests another customer’s order
+ | 404
+ | NFR-04
+ | Production request while live mode is off
+ | Transaction blocked
+ | FR-SYS-08
+ | Order with delivery address lacking landmark note
+ | Rejected
+ | FR-SYS-06
+ | 17.3 Pilot Acceptance
+Before live mode is enabled, a rehearsal in staging with staff acting as customers, merchants and riders must pass the acceptance scenarios of the SRS (AT-CUS-01 to 08 and the proposed scenarios for riders and system rules), the critical scenarios above and the measurement plan, with results recorded in the compliance file.
+18. Risks, Open Decisions and Architecture Decision Log
+18.1 Risk Register
+ID
+ | Risk
+ | Likelihood
+ | Impact
+ | Mitigation
+ | R-01
+ | A provider reduces or changes a free tier
+ | Medium
+ | Medium
+ | Ports and adapters; monthly review of Chapter 3.5; documented alternatives
+ | R-02
+ | Free backend sleeps or is unavailable when riders need offers
+ | High on Profile A
+ | High
+ | Move to an always-on instance before real riders (ADR-010); keep-alive only for rehearsals
+ | R-03
+ | SMS costs exceed expectation
+ | Medium
+ | Low to medium
+ | In-app delivery OTP; SMS fallback off by default and capped
+ | R-04
+ | Rider wallet is judged to be a regulated stored-value service
+ | Medium
+ | High
+ | Legal opinion; operate wallet through a licensed partner; live-mode gate
+ | R-05
+ | Payment aggregator onboarding or live approval takes longer than planned
+ | Medium
+ | High
+ | Start onboarding in Phase 0; keep sandbox demonstration path
+ | R-06
+ | ART/ANTIC or NECAP steps delay launch
+ | Medium
+ | High
+ | Begin immediately; the regulatory gate lets development continue
+ | R-07
+ | Budget phones delay background push so offers are missed
+ | High
+ | High
+ | Battery-optimisation onboarding; WebSocket in foreground; phone call fallback; measure on real devices
+ | R-08
+ | Android restricts full-screen intents for this app category
+ | Medium
+ | Medium
+ | Fallback high-importance notification with actions; request permission with explanation
+ | R-09
+ | Map data and pins stay unreliable
+ | High
+ | Medium
+ | Landmark notes, calls, Plus Codes, pin corrections (address asset)
+ | R-10
+ | Offline OTP check abused by a rider
+ | Medium
+ | Medium
+ | Server verification, review state, mismatch flags (9.6.1)
+ | R-11
+ | Database free limits reached before revenue
+ | Medium
+ | Medium
+ | Retention jobs, operating-hours scheduling, upgrade triggers
+ | R-12
+ | Cloudflare free CPU limit breaks server-rendered pages
+ | Medium
+ | Low
+ | Mostly static pages; bundle size check in CI; $5 plan if needed
+ | R-13
+ | Transfer of personal data abroad needs authorisation not yet obtained
+ | Medium
+ | High
+ | Data inventory, minimisation, early engagement with the authority, counsel review
+ | R-14
+ | Student team capacity cannot cover all modules before the pilot
+ | High
+ | High
+ | Strict phase gates; defer iOS, reports, promotions and favourites to after the pilot
+ | R-15
+ | Native-module needs (foreground service, notifications, maps) conflict with the New Architecture or Expo SDK upgrades
+ | Medium
+ | Medium
+ | Prototype each native capability in Phase 0; pin SDK version; development builds
+ | 18.2 Open Technical Decisions
+These decisions arise from the design and are numbered TD to avoid clashing with the SRS open decisions (OD). Each has a proposed default.
+ID
+ | Decision
+ | Proposed default
+ | Related SRS item
+ | TD-01
+ | Online-only payment (BR-CUS-06) versus cash on delivery backed by the rider wallet (FR-DEL-7.3, CT-3)
+ | Support both: online payment and wallet-backed COD, with COD switchable by flag per neighbourhood
+ | BR-CUS-06, FR-DEL-7.3
+ | TD-02
+ | Payment aggregator selection
+ | Choose after sandbox trials and fee comparison; keep the adapter interface fixed
+ | OD-02
+ | TD-03
+ | Hosting profile for the closed pilot
+ | Profile A for rehearsals; Profile C for live operation
+ | Chapter 3.4
+ | TD-04
+ | SMS provider and whether fallback is enabled
+ | Provider for rider OTP only; fallback disabled
+ | ADR-007
+ | TD-05
+ | Merchant acceptance timeout
+ | 3 minutes then reject automatically (to tune)
+ | FR-MER-05
+ | TD-06
+ | Customer cancellation window
+ | Until the merchant accepts
+ | OD-03, OD-04
+ | TD-07
+ | Pool window and targeted rounds
+ | 60 s and 1 round
+ | FR-DEL-3.3
+ | TD-08
+ | Pickup fulfilment at launch
+ | Disabled by flag; model supports it
+ | OD-12
+ | TD-09
+ | Number of simultaneous deliveries per rider
+ | One at the pilot
+ | FR-DEL-3.x
+ | TD-10
+ | Retention periods in 11.6
+ | As proposed pending legal review
+ | OD-11, OD-13
+ | TD-11
+ | Admin role split in 10.3.1
+ | As proposed
+ | FR-ADM-03
+ | TD-12
+ | Customer registration fields
+ | Email and password, phone verified before first order
+ | OD-01
+ | TD-13
+ | iOS release timing
+ | After the Android pilot
+ | NFR-DEL-C-1
+ | 18.3 Architecture Decision Log
+ID
+ | Decision
+ | Alternatives rejected
+ | Consequences
+ | ADR-001
+ | Six repositories, one per deliverable
+ | Monorepo with pnpm workspaces and Turborepo
+ | Each deliverable builds, versions and ships independently; contract kept in step through the published OpenAPI document; cost is duplicated small helpers and no atomic cross-repo change
+ | ADR-002
+ | Express modular monolith with routes, controllers, services and repositories (ports for external providers)
+ | Microservices; NestJS
+ | Smallest operational footprint; discipline needed to keep layer and module boundaries
+ | ADR-003
+ | Next.js on Cloudflare via OpenNext
+ | Vercel Hobby; Netlify; self-hosting on a VM
+ | Free commercial hosting; CPU limit shapes rendering strategy
+ | ADR-004
+ | In-memory geo index at pilot, Redis behind the same port later
+ | Redis from day one
+ | Single instance at pilot; clean scale path
+ | ADR-005
+ | PostgreSQL idempotency table as source of truth
+ | Redis only
+ | Durable and transactional; slightly more database load
+ | ADR-006
+ | Outbox plus pg-boss
+ | Kafka; BullMQ with Redis
+ | No extra bill; limited throughput that is adequate for the pilot
+ | ADR-007
+ | In-app delivery OTP, SMS as fallback
+ | SMS for every order
+ | Low variable cost; customer app required for COD OTP, otherwise fallback
+ | ADR-008
+ | MapLibre with PMTiles on R2; navigation by deep link
+ | Google Maps SDK; Mapbox; public OSM tile servers (usage policy)
+ | No map fees; rider uses an external navigation app
+ | ADR-009
+ | Aggregator behind PaymentPort
+ | Direct MoMo and Orange first
+ | Faster start; extra fee layer; adapter allows migration
+ | ADR-010
+ | First paid item is an always-on backend
+ | Keep-alive pings in production
+ | About $7 per month; reliable offers
+ | ADR-011
+ | Typed query layer with hand-written SQL for critical statements
+ | Heavy ORM abstractions
+ | More SQL knowledge required; predictable behaviour
+ | ADR-012
+ | Three separate Next.js apps (customer, merchant, admin)
+ | One app with route groups
+ | Slightly more deployment configuration
+ | ADR-013
+ | SSE for one-way streams, WebSocket for riders
+ | WebSocket everywhere; polling
+ | Lower connection cost for viewers
+ | ADR-014
+ | Wallet as an append-only double-entry ledger
+ | Mutable balance column
+ | More design effort; reconciliation by construction
+ | ADR-015
+ | OpenAPI with Swagger UI as the single API contract
+ | Separate hand-maintained docs; shared source package
+ | Schemas must be kept annotated in code; one source for all six repos
+ | 19. Delivery Roadmap
+The phases follow the SRS schedule and are sized for a small student team. Durations are proposals in weeks and must be aligned with the SRS timeline in Section 7.
+Phase
+ | Scope
+ | Exit criteria
+ | Weeks (proposed)
+ | 0 Foundations
+ | Six repositories, CI per repository, environments, database and migrations, authentication, design system, native capability prototypes (foreground location service, ringing notification, offline SQLite, MapLibre), start of provider and regulator onboarding
+ | Prototypes run on a 1 GB Android phone; CI green
+ | 3
+ | 1 Customer ordering
+ | Catalogue, merchant menu management basics, cart with switch rule, checkout with mock payment, order creation
+ | Customer can place a mock order on web and mobile
+ | 4
+ | 2 Core engine
+ | Order and delivery state machines, outbox, idempotency, payment adapter with sandbox, UNKNOWN handling, ledger
+ | Critical payment and idempotency scenarios pass
+ | 4
+ | 3 Rider
+ | Rider app, KYC upload, dispatch, offers, offline command queue, POD, wallet and COD
+ | Offline completion scenario passes on real devices
+ | 5
+ | 4 Merchant and admin
+ | Merchant order board, staff, stock; admin verification, moderation, disputes, analytics, settings, audit
+ | Admin approves a rider and merchant; dispute action audited
+ | 4
+ | 5 Hardening
+ | Security tests, performance and battery measurements, accessibility, backups and restore drill, runbooks, compliance file, regulator reporting adapter
+ | Measurement plan passed; compliance flags ready
+ | 3
+ | 6 Pilot
+ | One corridor, 10 to 15 restaurants, 5 to 10 riders; daily reconciliation; unit economics tracking
+ | Contribution-margin-positive orders demonstrated (DC-09 of the synopsis)
+ | Ongoing
+ | Appendix A – Glossary
+Term
+ | Meaning
+ | ADR
+ | Architecture Decision Record: a short record of a design decision, its context, alternatives and consequences
+ | Aggregator
+ | A licensed payment service that exposes MTN MoMo and Orange Money (and often other channels) through one API
+ | Command
+ | A user or rider intention recorded with an idempotency key, for example CONFIRM_PICKUP
+ | CU-hour
+ | Compute-unit hour, the usage measure of the chosen PostgreSQL provider’s free plan
+ | Double-entry ledger
+ | Accounting record in which every transaction has equal debits and credits
+ | EAS
+ | Expo Application Services: cloud builds and over-the-air updates for Expo apps
+ | FCM
+ | Firebase Cloud Messaging, the push delivery service for Android
+ | Geo index
+ | Structure that finds the nearest riders to a point
+ | Layered architecture
+ | Routes, controllers, services and repositories, each layer calling only the one beneath it; external providers sit behind ports
+ | MapLibre
+ | Open-source map rendering library
+ | OpenNext
+ | Adapter that lets Next.js run on Cloudflare Workers
+ | Outbox
+ | Table written in the same transaction as a state change to guarantee event publication
+ | OTA update
+ | Over-the-air update of an app’s JavaScript without a store release
+ | PMTiles
+ | Single-file format for map tiles that can be served from object storage
+ | Port and adapter
+ | An interface owned by the business logic and its replaceable implementation
+ | SSE
+ | Server-Sent Events: one-way streaming from server to browser or app over HTTP
+ | Appendix B – References and Research Sources
+Research for the technology and cost decisions was carried out in November 2026. Free-tier limits change frequently; each item must be confirmed on the provider’s own pricing or documentation page before it is relied upon. Items without a link are vendor pricing or limits pages found through search whose exact address should be recorded by the team when confirming.
+Hosting, data and platform limits
+Vercel Hobby plan fair-use and commercial-use restriction (vendor documentation).
+Render free web service behaviour, instance hours and database expiry (vendor documentation and independent 2026 reviews, for example Free backend hosting 2026 and Free hosting that does not sleep).
+Oracle Cloud Always Free resources and reclaim policy (vendor documentation).
+Neon free plan compute, storage and scale-to-zero (vendor documentation and comparison guides).
+Upstash Redis free plan: 256 MB and 500,000 commands per month (vendor pricing page).
+Cloudflare Workers free plan limits and OpenNext adapter (vendor documentation); Cloudflare R2 free allowance (vendor pricing).
+Expo SDK 56 and the New Architecture: Upgrading to SDK 56 and New Architecture guide; EAS Free plan limits (vendor pricing).
+Maps, messaging and payments
+Google Maps Platform billing and pricing FAQ for per-product free usage.
+Google Identity Platform pricing for phone-authentication SMS pricing by country.
+Notch Pay developer documentation: mobile money collection and transfers; CamPay integration write-up: Shipping payments in Cameroon with CamPay.
+Law and compliance
+DLA Piper – Data protection in Cameroon and CIO Mag – Protection des données au Cameroun avant juin 2026 for Law No. 2024/017. These are secondary sources; counsel must confirm the obligations.
+Appendix C – Identifier Crosswalk
+This document was written while the SRS identifiers were being finalised. Where a short label used in the text differs from the identifier in the final SRS, this appendix gives the SRS identifier. The SRS identifier is authoritative.
+C.1 System-Wide Requirement Labels
+Label used in this TDD
+ | Meaning
+ | SRS anchor
+ | FR-SYS-01, FR-SYS-02, FR-SYS-03
+ | Order state machine; idempotent mutating endpoints; payment adapter layer
+ | Same identifiers in the SRS (FR-SYS-03 also holds the UNKNOWN-state rule)
+ | FR-SYS-04
+ | UNKNOWN payment never refunds, triggers reconciliation
+ | SRS FR-SYS-03 (second sentence); DC-03
+ | FR-SYS-05
+ | Wallet-backed COD and daily reconciliation
+ | FR-DEL-7.3; CT-3
+ | FR-SYS-06 (in this TDD)
+ | Mandatory landmark note
+ | DC-05; FR-DEL-4.2. The SRS identifier FR-SYS-06 means event fan-out
+ | FR-SYS-07
+ | Persisted pin corrections as an address asset
+ | DC-05; FR-DEL-4.5
+ | FR-SYS-08
+ | Regulatory gating before live transactions
+ | NN-1; NFR-SYS-01; NFR-DEL-S-6
+ | FR-SYS-09
+ | Event fan-out through a queue
+ | SRS FR-SYS-06
+ | DC-07
+ | Phone calls as primary navigation, landmark notes, address asset
+ | SRS DC-05
+ | DC-08
+ | Native rider app
+ | SRS DC-06
+ | DC-09
+ | Unit economics before geography
+ | NN-4
+ | C.2 Performance and Non-Functional Labels
+TDD label
+ | SRS identifier
+ | TDD label
+ | SRS identifier
+ | TDD label
+ | SRS identifier
+ | PR-01
+ | NFR-CUS-01
+ | NFR-06
+ | NFR-CUS-07
+ | NFR-28
+ | NFR-MER-08
+ | PR-08
+ | NFR-DEL-P-4
+ | NFR-07
+ | NFR-DEL-S-4
+ | NFR-29
+ | NFR-CUS-22
+ | PR-02
+ | NFR-CUS-02
+ | NFR-08
+ | NFR-CUS-08
+ | NFR-30
+ | NFR-MER-12
+ | PR-09
+ | NFR-DEL-P-5
+ | NFR-09
+ | NFR-DEL-S-2
+ | NFR-31 to NFR-34
+ | NFR-CUS-09 to NFR-CUS-12
+ | PR-03
+ | NFR-CUS-03
+ | NFR-10
+ | NFR-DEL-S-3
+ | NFR-35
+ | NFR-MER-10
+ | PR-10
+ | NFR-DEL-P-6
+ | NFR-11
+ | NFR-ADM-02
+ | NFR-36
+ | NFR-CUS-13
+ | PR-04
+ | NFR-MER-02
+ | NFR-12
+ | NFR-CUS-24
+ | NFR-37
+ | NFR-MER-05
+ | PR-11
+ | NFR-DEL-P-7
+ | NFR-13
+ | NFR-CUS-23
+ | NFR-38
+ | NFR-CUS-14
+ | PR-05
+ | NFR-DEL-P-1
+ | NFR-14
+ | NFR-MER-11
+ | NFR-39
+ | NFR-CUS-27
+ | PR-12
+ | NFR-CUS-17
+ | NFR-15
+ | NFR-DEL-S-5
+ | NFR-40 to NFR-46
+ | NFR-DEL-U-1 to U-7
+ | PR-06
+ | NFR-DEL-P-2
+ | NFR-16
+ | NFR-ADM-03
+ | NFR-47
+ | NFR-CUS-26
+ | PR-13
+ | NFR-MER-06
+ | NFR-17
+ | NFR-DEL-S-6
+ | NFR-48 to NFR-50
+ | NFR-CUS-15, 16, 28
+ | PR-07
+ | NFR-DEL-P-3
+ | NFR-18
+ | NFR-CUS-04
+ | NFR-51
+ | NFR-MER-09
+ | NFR-01
+ | NFR-ADM-01
+ | NFR-19
+ | NFR-MER-03
+ | NFR-52 to NFR-56
+ | NFR-DEL-C-1 to C-5
+ | NFR-02
+ | NFR-CUS-05
+ | NFR-20
+ | NFR-MER-04
+ | NFR-57, NFR-58
+ | NFR-CUS-18, 19
+ | NFR-03
+ | NFR-DEL-S-1
+ | NFR-21 to NFR-25
+ | NFR-DEL-R-1 to R-5
+ | NFR-59
+ | NFR-MER-07
+ | NFR-04
+ | NFR-CUS-06
+ | NFR-26
+ | NFR-CUS-21
+ | NFR-60
+ | NFR-CUS-20
+ | NFR-05
+ | NFR-MER-01
+ | NFR-27
+ | NFR-CUS-25
+ | NFR-61 to NFR-63
+ | NFR-DEL-M-1 to M-3
+ | 

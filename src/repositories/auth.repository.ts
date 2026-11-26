@@ -313,10 +313,71 @@ export const authRepository = {
 		id: string;
 		userId: string | null;
 		action: string;
+		targetType?: string | null;
+		targetId?: string | null;
 		details: string | null;
 		ip: string | null;
 		userAgent: string | null;
 	}) {
 		return prisma.auditLog.create({ data });
+	},
+
+	// Finds the MFA row for an admin.
+	findAdminMfa(userId: string) {
+		return prisma.adminMfa.findUnique({ where: { userId } });
+	},
+
+	// Stores or replaces a pending MFA secret.
+	upsertAdminMfa(userId: string, secretEncrypted: string) {
+		return prisma.adminMfa.upsert({
+			where: { userId },
+			create: { userId, secretEncrypted },
+			update: { secretEncrypted, enabledAt: null },
+		});
+	},
+
+	// Marks the stored secret as confirmed.
+	enableAdminMfa(userId: string) {
+		return prisma.adminMfa.update({
+			where: { userId },
+			data: { enabledAt: new Date() },
+		});
+	},
+
+	// Removes the MFA secret and every recovery code for one admin.
+	deleteAdminMfa(userId: string) {
+		return prisma.$transaction([
+			prisma.adminRecoveryCode.deleteMany({ where: { userId } }),
+			prisma.adminMfa.deleteMany({ where: { userId } }),
+		]);
+	},
+
+	// Replaces all recovery codes with a freshly hashed set.
+	replaceAdminRecoveryCodes(
+		userId: string,
+		codes: { id: string; codeHash: Bytes }[],
+	) {
+		return prisma.$transaction(async (tx) => {
+			await tx.adminRecoveryCode.deleteMany({ where: { userId } });
+
+			await tx.adminRecoveryCode.createMany({
+				data: codes.map((code) => ({ ...code, userId })),
+			});
+		});
+	},
+
+	// Finds an unused recovery code by its hash.
+	findUnusedRecoveryCode(codeHash: Bytes) {
+		return prisma.adminRecoveryCode.findFirst({
+			where: { codeHash, usedAt: null },
+		});
+	},
+
+	// Marks one recovery code as used.
+	useRecoveryCode(id: string) {
+		return prisma.adminRecoveryCode.update({
+			where: { id },
+			data: { usedAt: new Date() },
+		});
 	},
 };

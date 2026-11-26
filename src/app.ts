@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
 import { openapi } from "./docs/openapi.ts";
+import adminRoutes from "./routes/admin.routes.ts";
 import authRoutes from "./routes/auth.routes.ts";
 
 const app: Application = express();
@@ -33,6 +34,9 @@ app.get("/health", (req, res) => {
 
 // All authentication endpoints.
 app.use("/api/auth", authRoutes);
+
+// Admin dashboard endpoints. authenticate runs inside the router.
+app.use("/api/admin", adminRoutes);
 
 // Custom response for routes that do not exist.
 app.use((req, res) => {

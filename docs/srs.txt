@@ -1,0 +1,1349 @@
+REPUBLIC OF CAMEROON
+PEACE – WORK – FATHERLAND
+BUEA, SOUTH WEST REGION
+Software Requirements Specification
+Multi-Restaurant Food Delivery Marketplace for Cameroon — Buea Launch
+Working title: Resto
+UNIVERSITY OF BUEA
+FACULTY OF ENGINEERING AND TECHNOLOGY (FET)
+By: [GROUP MEMBERS]
+COURSE INSTRUCTOR: [Instructor name]
+Item
+ | Detail
+ | Document version
+ | 1.0 (Draft for team review)
+ | Date
+ | 13 November 2026
+ | Actors covered
+ | Customer, Merchant (Restaurant), Delivery Agent (Rider), System Administrator
+ | Platforms
+ | Customer: web and mobile; Merchant: browser-based (smartphone, tablet, computer); Delivery Agent: native mobile app (Android 8.0+ primary, iOS 15+ secondary); Admin: web dashboard
+ | Launch ground
+ | Buea, South-West Region, Cameroon
+ | Structural blueprint
+ | CEF440 Group 4 SRS (Software Requirement Specifications)
+ | Source documents
+ | Customer Actor SRS; Restaurant Merchant Requirements; Delivery Agent Mobile Application Requirements (v2.0); System Admin Module; Project Synopsis
+ | Table of Contents
+Introduction — 1.1 Purpose; 1.2 Scope; 1.3 Overview; 1.4 Intended Audience; 1.5 Requirement Conventions and Identification Scheme
+General Description — 2.1 Product Functions; 2.2 User Community; 2.3 Stakeholder Summary; 2.4 Actors, Platforms and Channels; 2.5 Ordering Model and Business Rules; 2.6 Launch Context and Buea-Specific Constraints; 2.7 Technical Direction and Design Principles; 2.8 Assumptions and Dependencies
+Functional Requirements — Tables 3-A to 3-E (Customer, Merchant, Delivery Agent, Admin, System-Wide); 3.1 Possible Outcomes per Functional Requirement; 3.2 Input–Output Relationships; 3.3 Data and Validation Rules; 3.4 Example Use Case
+User Interface Requirements — 4.1 Software Interfaces; 4.2 User Interface Examples
+Performance Requirements — 5.1 Throughput Targets; 5.2 Scalability
+Non-Functional Attributes — 6.1 Usability; 6.2 Reliability; 6.3 Security; 6.4 Privacy, Regulatory and Compliance; 6.5 Operability and Maintainability
+Schedule and Budget — 7.1 Project Timeline; 7.2 Cost Estimate
+Appendices — A Requirement Gathering Summary; B Glossary; C References; D Acceptance Scenarios and Traceability; E Open Decisions
+1. Introduction
+1.1 Purpose
+This Software Requirements Specification (SRS) defines the complete set of requirements for a multi-restaurant food delivery marketplace for Cameroon, launching in Buea (working title: Resto, referred to in this document as “the Platform”). It consolidates into a single document the requirements that were first written separately for the four actors identified so far — the Customer, the Merchant (restaurant owner or manager), the Delivery Agent (motorcycle rider) and the System Administrator — together with the strategic and technical direction recorded in the Project Synopsis.
+The document is intended to serve as a formal agreement between the development team and all stakeholders regarding what the system will do, how it will perform, and the constraints under which it will operate. It provides a single authoritative reference for developers, testers, supervisors and evaluators throughout the project lifecycle.
+1.2 Scope
+The system to be developed is a food delivery marketplace in which restaurants post their full menus to one platform, customers browse meals from many kitchens in a single interface, order instantly, pay by mobile money (or cash on delivery, backed by a rider wallet), and receive delivery through a managed network of motorcycle delivery agents. The feature set mirrors established global delivery platforms, but every layer is redesigned around Cameroonian realities: unreliable street addressing, intermittent connectivity (including a history of internet shutdowns in the South-West), dominant cash-on-delivery habits, mobile-money payment rails and low-end Android devices.
+The problem addressed is not a lack of demand but a lack of execution depth. Most food ordering in Cameroon still happens through phone calls and WhatsApp, which is unreliable, unbranded and impossible to scale. The Platform therefore concentrates on two areas that global playbooks handle poorly in Africa: payment collection reliability (especially cash-on-delivery reconciliation) and last-mile address resolution (landmark-based navigation).
+Key capabilities of the system include:
+Customer registration, authentication, profile and delivery-address management, restaurant discovery, menu browsing, single-restaurant cart management, checkout, payment, order tracking, order history, notifications, reviews, support and favourites.
+Merchant account, restaurant, menu, price, inventory, staff, order, payment, sales, customer, promotion, report, notification and availability management.
+Delivery agent onboarding with identity verification, online/offline availability, time-boxed dispatch offers, landmark-aware navigation, order lifecycle actions, proof of delivery, wallet-backed cash handling, earnings and support — all usable offline.
+Administrator review of merchant and rider applications, user and account management, content moderation, order override and dispute resolution, platform analytics and system configuration, protected by multi-factor authentication and an uneditable audit log.
+Idempotent order and payment processing through a payment adapter layer (MTN MoMo and Orange Money) with a reconciliation path for uncertain payment outcomes.
+Regulatory compliance: ART/ANTIC certification and NECAP interconnection before the first live transaction.
+The initial deployment is deliberately narrow: one neighbourhood corridor in Buea with 10–15 restaurants within a 3 km radius and 5–10 motorcycle riders, with English as the default locale. Expansion to Yaoundé or Douala is out of scope until contribution-margin-positive orders are proven on the Buea corridor.
+1.3 Overview
+This document is structured to follow the CEF440 Group 4 SRS blueprint:
+Section 2 – General Description: Provides a high-level overview of the product, its functions, its user community, the ordering model, the Buea launch constraints, the technical direction and the assumptions.
+Section 3 – Functional Requirements: Defines what the system must do for each actor, together with possible outcomes, input–output relationships, data rules and an example use case.
+Section 4 – User Interface Requirements: Describes software interfaces and example screens for each actor.
+Section 5 – Performance Requirements: Specifies measurable performance targets including response time, battery, data usage and scalability.
+Section 6 – Non-Functional Attributes: Covers usability, reliability, security, privacy, compliance, compatibility and maintainability requirements.
+Section 7 – Schedule and Budget: Outlines the proposed project timeline and cost categories.
+Section 8 – Appendices: Provides the requirement gathering summary, glossary, references, acceptance scenarios, traceability and open decisions.
+1.4 Intended Audience
+This document is intended for project team members, system analysts, software developers, UI/UX designers, database designers, software testers, project supervisors and other stakeholders involved in developing and evaluating the system.
+1.5 Requirement Conventions and Identification Scheme
+The phrase “the system shall” denotes a mandatory requirement. “Should” denotes a recommended requirement or target, and “may” denotes an optional capability. Numerical performance and availability values are proposed project targets that must be reviewed and approved by the project team. Each requirement carries a unique identifier to support implementation, testing and traceability.
+Requirements keep the identifiers used in their source documents so that every requirement can be traced back to its origin. Non-functional requirements in Sections 5 and 6 are renumbered sequentially (PR-xx and NFR-xx) and show their original identifier in a Source ID column.
+Prefix
+ | Meaning
+ | Source document
+ | FR-CUS-nn
+ | Customer functional requirement
+ | Customer Actor SRS
+ | FR-MER-nn
+ | Merchant functional requirement (original FR01–FR15)
+ | Restaurant Merchant Requirements
+ | FR-DEL-n.n
+ | Delivery agent functional requirement (original FR-1.1–FR-8.4)
+ | Delivery Agent Mobile Application
+ | FR-ADM-nn
+ | Administrator functional requirement
+ | System Admin Module
+ | FR-SYS-nn
+ | System-wide functional requirement
+ | Project Synopsis
+ | BR-CUS-nn
+ | Customer business rule
+ | Customer Actor SRS
+ | CT-n
+ | Buea-specific constraint
+ | Delivery Agent Mobile Application
+ | PR-nn / NFR-nn
+ | Performance / non-functional requirement (Sections 5 and 6)
+ | All four actor documents
+ | AT-xxx-nn
+ | Acceptance scenario
+ | Customer Actor SRS and this document
+ | OD-nn
+ | Open decision
+ | Customer Actor SRS and this document
+ | Priority values for delivery agent requirements are those stated in the source (Must, Should, Could, Info). In Sections 5 and 6, “shall”, “must” and “Mandatory” are shown as High, and “should” as Medium.
+2. General Description
+2.1 Product Functions
+The Platform is a two-sided (in fact four-actor) marketplace that connects customers, restaurants and delivery agents under the control of a platform administrator. It fulfils the following primary functions:
+Restaurant discovery and menu browsing: Customers find restaurants, search and filter them, and explore menus with options and customisations.
+Single-restaurant ordering: Customers build a cart from one restaurant at a time, check out, and pay through supported payment methods.
+Order management: Merchants receive, accept or reject, prepare and track orders; customers follow progress in real time.
+Managed delivery: Orders are offered to nearby delivery agents, who navigate with landmark notes and phone calls, pick up, deliver and prove delivery.
+Payments and cash reconciliation: Mobile money and wallet-backed cash on delivery, with idempotent processing and reconciliation of uncertain payment states.
+Earnings and settlement: Rider wallets, withdrawals, merchant payment and sales views, and platform commission tracking.
+Verification and trust: Administrator review of merchant and rider documents, moderation, dispute resolution and audit logging.
+Offline resilience: The rider app completes pickup, drop-off, proof of delivery and cash collection with zero connectivity and syncs later.
+Operations intelligence: Analytics, reports and configurable platform parameters (commission, delivery radius, delivery fee, categories).
+The Platform is an operations company that happens to have an app, not an app company hoping operations sort themselves out. Its differentiation must come from reliability, offline durability and wallet trust rather than catalogue size.
+2.2 User Community
+The Platform serves the following user groups, as identified during stakeholder analysis.
+2.2.1 Primary Users – Customers
+End users who discover restaurants, explore menus, purchase food and receive fulfilment. They access the Platform through web and mobile applications, select food items, review the cart, choose pickup or delivery, provide delivery information and pay. Their technical knowledge is assumed to be low to moderate. Customers are responsible for providing valid contact and delivery details, including landmark notes.
+2.2.2 Primary Users – Merchants and Restaurant Staff
+Merchants (restaurant owners or managers) register restaurants, manage menus, prices, inventory, staff, promotions and orders, and monitor payments, sales and reports. Restaurant staff prepare food and process orders under roles assigned by the merchant.
+2.2.3 Primary Users – Delivery Agents (Riders)
+Motorcycle (and, where permitted, bicycle or car) delivery agents who accept dispatch offers, pick up from restaurants, deliver to customers, handle cash and earn income. They typically use low-end Android devices (1–2 GB RAM), often with gloves and one hand, in variable connectivity. Delivery workers in Buea currently earn roughly 2,000–8,000 FCFA per day (average about 4,000 FCFA), which sets the baseline for the earnings experience.
+2.2.4 Primary Users – System Administrators
+The system administrators hold superior management control over the entire Platform and act as its regulatory authority, responsible for platform security, integrity, trust and conflict resolution. They work mainly through an administrative web dashboard: they review uploaded files (ID cards, licences, business permits, vehicle registration and other required documents from merchants and riders) and monitor live operational metrics, transaction logs and user-activity data.
+2.2.5 Oversight Stakeholders and External Parties
+Regulators and compliance bodies (ART – Agence de Régulation des Télécommunications, ANTIC – Agence Nationale des Technologies de l’Information et de la Communication, and the NECAP interconnection for payment and SMS reporting), mobile money operators (MTN MoMo, Orange Money), academic supervisors and the course instructor.
+2.3 Stakeholder Summary
+Stakeholder
+ | Role
+ | Interest / Concern
+ | Influence
+ | Customers
+ | Order placers and payers
+ | Reliable delivery, fair prices, payment safety, privacy
+ | High
+ | Merchants (restaurant owners)
+ | Supply side, menu and order managers
+ | Order volume, accurate payments, easy dashboard, reports
+ | High
+ | Restaurant staff
+ | Food preparation and order processing
+ | Clear order queue, role-based access
+ | Medium
+ | Delivery agents
+ | Last-mile fulfilment
+ | Fair earnings, battery, offline reliability, safety
+ | High
+ | System administrators
+ | Platform regulators
+ | Security, trust, dispute resolution, auditability
+ | High
+ | Mobile money operators
+ | Payment rails
+ | Correct integration, settlement within 24 hours
+ | High
+ | Regulators (ART, ANTIC, NECAP)
+ | Compliance enforcers
+ | Certification, real-time transaction reporting
+ | High
+ | Development team
+ | System builders
+ | Technical feasibility, clear specifications
+ | High
+ | Academic supervisors
+ | Overseers
+ | Requirement quality, research validity
+ | Medium
+ | 2.4 Actors, Platforms and Channels
+Actor
+ | Primary channel
+ | Key responsibilities
+ | Customer
+ | Web application and mobile application (same business rules on both)
+ | Browse, cart, checkout, pay, track, review, seek support
+ | Merchant (Owner)
+ | Browser-based dashboard on smartphones, tablets and computers
+ | Manage restaurant, menu, orders, staff, sales and reports
+ | Restaurant Staff
+ | Merchant dashboard (role-limited)
+ | Prepare food and process orders
+ | Delivery Agent
+ | Dedicated native mobile app (Android 8.0+ primary, iOS 15+ secondary); not a PWA
+ | Accept offers, navigate, collect, deliver, prove delivery, manage wallet
+ | System Administrator
+ | Administrative web dashboard
+ | Verify, moderate, resolve disputes, configure, monitor
+ | 2.5 Ordering Model and Business Rules
+The Platform adopts a single-restaurant-per-checkout ordering model. A customer can browse many restaurants, but one cart and one order belong to exactly one restaurant:
+A customer selects a restaurant before adding food items to the active shopping cart.
+The active cart can contain items from only one restaurant, and a customer cannot combine items from different restaurants in one checkout.
+Every successfully submitted order belongs to exactly one restaurant; ordering from another restaurant requires a separate checkout.
+If a customer tries to add an item from a different restaurant while the cart contains items, the system displays a warning and asks for confirmation before clearing the cart.
+If the customer cancels, the existing cart remains unchanged. If the customer confirms, the cart is cleared and the attempted item from the new restaurant is added.
+Both the web and mobile customer applications implement the same fundamental business rules, particularly for cart management, checkout and order creation.
+ID
+ | Business Rule
+ | Description
+ | BR-CUS-01
+ | Single Restaurant Per Cart
+ | An active cart can contain items belonging to only one restaurant.
+ | BR-CUS-02
+ | Single Restaurant Per Order
+ | Every submitted order must be associated with exactly one restaurant.
+ | BR-CUS-03
+ | Restaurant Switch Confirmation
+ | Attempting to add an item from another restaurant triggers a warning and confirmation request.
+ | BR-CUS-04
+ | Cart Preservation
+ | If the customer cancels the restaurant switch, the existing cart must remain unchanged.
+ | BR-CUS-05
+ | Cart Replacement
+ | If the customer confirms the switch, the old cart must be cleared and the new restaurant’s item added.
+ | BR-CUS-06
+ | Online Payment
+ | Orders must be paid using supported online payment methods.
+ | BR-CUS-07
+ | Fulfilment Options
+ | Customers may select pickup or delivery, depending on the restaurant’s available services.
+ | BR-CUS-08
+ | Separate Checkouts
+ | Orders from different restaurants must be completed through separate checkout processes.
+ | Reconciliation note: BR-CUS-06 (online payment) must be read together with the Delivery Agent requirements and the Project Synopsis, which require cash on delivery (COD) backed by a rider wallet (FR-DEL-7.3, CT-3). This tension is recorded as open decision OD-14 in Appendix E and must be resolved by the team before implementation of checkout.
+2.6 Launch Context and Buea-Specific Constraints
+Launch parameters: Buea, South-West Region; one neighbourhood corridor; 10–15 restaurants within a 3 km radius; 5–10 motorcycle riders; English as the default locale (French also supported); wallet-backed COD so riders never carry unbacked cash risk; unit economics proven per order before any geographic expansion.
+ID
+ | Constraint
+ | Design Implication
+ | CT-1
+ | 4G exists in Buea town on MTN and Orange, but the Anglophone South-West has a history of internet shutdowns since 2017. Connectivity cannot be assumed as continuously available.
+ | Offline-first mobile app with local-first writes and queued sync; never assume the network is present.
+ | CT-2
+ | Battery is a scarce, budgeted resource for motorcycle riders working long days.
+ | Adaptive GPS, event-driven push (not polling), throttled map rendering and batched background work are non-negotiable.
+ | CT-3
+ | COD remains dominant. Riders handle cash and must reconcile daily.
+ | Wallet-backed COD model; prepaid vs. COD clearly distinguished in every offer and earnings view.
+ | CT-4
+ | Buea addressing is landmark-relative and Google Maps coverage is incomplete; many places are unmapped or have pins 50–100 m off, especially outside central Molyko.
+ | Phone call is the primary navigation aid; landmark notes required; pin correction persistence; Plus Codes as fallback.
+ | CT-5
+ | Mobile money (MTN MoMo, Orange Money) is the default digital rail.
+ | Rider payouts and wallet top-ups integrate with both operators; 24-hour settlement expectation.
+ | CT-6
+ | Budget Android devices dominate the rider fleet. ReeyoGo is already active in Buea on Android, setting the device baseline.
+ | Test matrix must include Android 8.0 / 1 GB RAM devices; app size under 30 MB.
+ | CT-7
+ | NECAP interconnection is mandatory for platforms processing payments/SMS in Cameroon.
+ | Payment and SMS adapters must report to NECAP in real time; suspension is the penalty for non-compliance.
+ | CT-8
+ | Competitive landscape: ReeyoGo is already operating in Buea, and informal WhatsApp-based rider networks exist.
+ | Differentiation must come from reliability, offline durability and wallet trust, not catalogue size.
+ | 2.7 Technical Direction and Design Principles
+The following design principles are taken from the Project Synopsis and constrain every functional and non-functional requirement.
+ID
+ | Principle
+ | Description
+ | DC-01
+ | Modular monolith first
+ | Microservices only when order density demands them; no premature Kafka clusters.
+ | DC-02
+ | Data stores
+ | PostgreSQL for orders and payments; Redis for geospatial indexing and idempotency; a queue for event fan-out.
+ | DC-03
+ | Sacred order state machine
+ | Every transition is idempotent, versioned and event-emitting. Duplicate charges and phantom deliveries are engineering failures, not operational accidents.
+ | DC-04
+ | Payment adapter layer
+ | MTN MoMo and Orange Money behind one interface.
+ | DC-05
+ | UNKNOWN payment state
+ | If the network drops mid-request, the payment becomes UNKNOWN; this never triggers a refund, it triggers reconciliation.
+ | DC-06
+ | Offline-first by default
+ | The rider app completes pickup, drop-off, POD capture and cash collection with zero connectivity and queues everything for sync.
+ | DC-07
+ | Phone calls as primary navigation aid
+ | Landmark notes are required fields; pin corrections persist and accumulate into a proprietary address asset.
+ | DC-08
+ | Native rider app
+ | Not a PWA: background GPS, battery discipline (adaptive 5 s / 30 s / 60 s) and offline durability require native execution.
+ | DC-09
+ | Unit economics before geography
+ | Break even per order in Buea before expanding; operations depth over catalogue size.
+ | 2.8 Assumptions and Dependencies
+Confirmed assumptions reflected in this SRS:
+The Platform supports multiple restaurants; customers may order from different restaurants but each order requires a separate checkout.
+An active cart can contain items from one restaurant only; the system warns the customer and requests confirmation before clearing the existing cart when switching (Option A).
+Customers access the system through both web and mobile applications; pickup and delivery are supported where offered by the selected restaurant.
+Delivery agents use a dedicated native mobile app; administrators use a web dashboard.
+Online payment is the customer-side payment model (see reconciliation note in 2.5 and OD-14).
+Dependencies:
+Restaurant functionality supplies menu, price, availability and operating-status information to the customer application.
+Payment gateway and mobile money services (MTN MoMo, Orange Money) provide verified transaction outcomes.
+Notification and SMS providers support OTP, push and customer notifications; they report to NECAP.
+Delivery functionality provides delivery progress information to the customer application.
+Restaurant service areas and platform rules (delivery radius, commission, base delivery fee configured by the administrator) determine delivery availability and charges.
+Map data is incomplete in Buea; the Platform depends on landmark notes, Plus Codes and accumulated pin corrections.
+3. Functional Requirements
+Each requirement describes a specific action or behaviour the system must perform. Requirements are grouped by actor (Tables 3-A to 3-D) and followed by system-wide requirements (Table 3-E). The Source / Rationale column identifies the originating document section and, where relevant, the business rule or constraint the requirement supports. Detailed requirements are lettered (a), (b), (c)… inside each description; all are mandatory unless the wording says “may”. Priorities are shown only where the source document states them (Delivery Agent requirements).
+Table 3-A: Customer Functional Requirements (FR-CUS)
+Registration, authentication and account
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-01
+ | Customer Registration
+ | The system shall allow new customers to create accounts using the registration information defined by the platform. Detailed: (a) identify mandatory registration fields; (b) validate completeness and format of submitted information; (c) prevent duplicate accounts where email addresses or phone numbers are required to be unique; (d) give feedback after successful or unsuccessful registration; (e) protect registration information from unauthorised access.
+ | Customer SRS 5.1; goal: register and securely access an account.
+ | FR-CUS-02
+ | Customer Authentication
+ | The system shall authenticate registered customers before granting access to protected account and order functions. Detailed: (a) customers sign in using the supported authentication mechanism; (b) reject invalid credentials; (c) do not reveal through error messages whether a particular account exists; (d) provide a sign-out function; (e) protected customer information is accessible only to authenticated users.
+ | Customer SRS 5.1.
+ | FR-CUS-03
+ | Password Recovery
+ | The system shall provide a secure mechanism through which customers can recover or reset forgotten passwords. Detailed: (a) customers initiate recovery using registered contact information; (b) use a time-limited verification mechanism; (c) notify customers of successful password changes where a verified notification channel exists; (d) never disclose the customer’s existing password.
+ | Customer SRS 5.1.
+ | FR-CUS-04
+ | View and Update Customer Profile
+ | The system shall allow authenticated customers to view and update permitted personal profile information. Detailed: (a) display saved profile information; (b) customers can modify supported profile fields; (c) validate updated information before saving; (d) confirm successful updates; (e) identify fields containing invalid information.
+ | Customer SRS 5.1.
+ | FR-CUS-05
+ | Manage Delivery Addresses
+ | The system shall allow customers to create, view, edit and delete saved delivery addresses. Detailed: (a) customers can save delivery addresses; (b) address information includes recipient name, phone number, street or area, city and delivery instructions; (c) customers can select saved addresses during checkout; (d) validate mandatory address information; (e) customers may identify a default delivery address where supported; (f) historical orders retain their original delivery address even if the saved address is later modified or deleted. See also FR-SYS-06 (mandatory landmark note).
+ | Customer SRS 5.1; CT-4.
+ | Restaurant discovery and menu browsing
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-06
+ | Browse Restaurants
+ | The system shall allow customers to view restaurants registered and available on the platform. Detailed: (a) display restaurant names and available information; (b) information may include images, location, cuisine and operating status; (c) customers can open individual restaurant profiles; (d) identify restaurants that are closed or unavailable; (e) prevent checkout with restaurants that are not accepting orders.
+ | Customer SRS 5.2; links to FR-MER-15.
+ | FR-CUS-07
+ | Search and Filter Restaurants
+ | The system shall allow customers to search for restaurants and filter available results. Detailed: (a) search using relevant search terms; (b) return restaurants matching the criteria; (c) apply filters such as cuisine, location and availability; (d) display an appropriate message when no matching restaurants are found.
+ | Customer SRS 5.2.
+ | FR-CUS-08
+ | View Restaurant Details
+ | The system shall display relevant information about a selected restaurant. Detailed: (a) display the restaurant’s name and available descriptive information; (b) display operating and ordering availability information; (c) customers can access the restaurant’s menu; (d) display delivery coverage, minimum order requirements or service conditions where configured.
+ | Customer SRS 5.2.
+ | FR-CUS-09
+ | Browse Restaurant Menu
+ | The system shall allow customers to browse the menu of a selected restaurant. Detailed: (a) display available food items; (b) items show name, description, image, price and availability; (c) menu items may be organised into categories; (d) customers can view individual item details; (e) clearly identify unavailable items; (f) prevent unavailable items from being added to the cart.
+ | Customer SRS 5.3; links to FR-MER-03, FR-MER-07.
+ | FR-CUS-10
+ | Search Menu Items
+ | The system shall allow customers to search for food items within the selected restaurant’s menu. Detailed: (a) results restricted to the selected restaurant; (b) search by item name; (c) the system may support searching by descriptions or categories; (d) display a message when no matching items are found.
+ | Customer SRS 5.3.
+ | FR-CUS-11
+ | Item Options and Customisations
+ | The system shall allow customers to select available food item options and customisations before adding an item to the cart. Detailed: (a) display required and optional customisations; (b) customers complete mandatory selections before adding the item; (c) calculate the final item price from selected options; (d) retain selected customisations in the cart and order details.
+ | Customer SRS 5.3.
+ | Shopping cart management
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-12
+ | Add Items to Cart
+ | The system shall allow customers to add available food items from the currently associated restaurant to the active cart. Detailed: (a) record the selected item; (b) record the selected quantity; (c) retain selected options and customisations; (d) calculate applicable item prices; (e) the first item added to an empty cart establishes the cart’s restaurant association; (f) prevent direct addition of items from another restaurant when the cart is non-empty; (g) give feedback after a successful addition.
+ | Customer SRS 5.4; BR-CUS-01.
+ | FR-CUS-13
+ | Warn Customer When Switching Restaurants
+ | When a customer attempts to add an item from a different restaurant while the active cart contains items, the system shall display a warning and request confirmation before clearing the existing cart. Detailed: (a) explain that one order can contain items from only one restaurant; (b) inform the customer that confirming will remove the existing cart items; (c) provide a confirmation option; (d) provide a cancellation option; (e) do not clear the cart before explicit confirmation; (f) initiate the restaurant switch only after the customer confirms.
+ | Customer SRS 5.4; BR-CUS-03.
+ | FR-CUS-14
+ | Cancel Restaurant Switch
+ | If the customer cancels a restaurant-switch warning, the system shall preserve the existing cart without modification. Detailed: (a) retain all existing cart items; (b) item quantities unchanged; (c) item customisations unchanged; (d) cart total unchanged; (e) the attempted item from the new restaurant is not added; (f) the customer may continue with the original cart.
+ | Customer SRS 5.4; BR-CUS-04.
+ | FR-CUS-15
+ | Confirm Restaurant Switch
+ | If the customer confirms a restaurant switch, the system shall clear the existing active cart and allow the attempted item from the new restaurant to be added. Detailed: (a) remove the previous restaurant’s cart items; (b) remove associated customisations; (c) reassociate the cart with the newly selected restaurant; (d) add the attempted item only after confirmation; (e) display the updated cart; (f) inform the customer that the previous cart was cleared; (g) clearing the cart shall not delete historical orders or payment records.
+ | Customer SRS 5.4; BR-CUS-05.
+ | FR-CUS-16
+ | View and Edit Cart
+ | The system shall allow customers to view and modify their active carts before checkout. Detailed: (a) display the associated restaurant; (b) each item shows name, quantity, options, unit price and line total; (c) increase or decrease quantities; (d) remove individual items; (e) recalculate totals after modification; (f) clear the entire cart; (g) enforce valid item quantities and availability.
+ | Customer SRS 5.4; BR-CUS-01.
+ | FR-CUS-17
+ | Calculate Order Summary
+ | The system shall calculate and display the order summary for the active single-restaurant cart. Detailed: (a) calculate the food subtotal; (b) include applicable taxes; (c) include configured service charges; (d) include delivery charges when applicable; (e) apply eligible discounts where supported; (f) display the final amount payable; (g) recalculate when cart contents or fulfilment details change; (h) customers can review the total before initiating payment.
+ | Customer SRS 5.4; links to FR-MER-12, FR-ADM-07.
+ | Checkout, payment and confirmation
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-18
+ | Select Fulfilment Method
+ | The system shall allow customers to select an available fulfilment method for their orders. Detailed: (a) provide pickup and delivery options where supported; (b) available options depend on the selected restaurant; (c) prevent selection of unsupported methods; (d) update checkout information and applicable charges according to the selected method.
+ | Customer SRS 5.5; BR-CUS-07.
+ | FR-CUS-19
+ | Provide Delivery Details
+ | When delivery is selected, the system shall require the customer to provide or select a valid registered delivery destination. Detailed: (a) select saved delivery addresses; (b) enter a new delivery address where supported; (c) collect required contact and location information; (d) customers may provide additional delivery instructions; (e) validate required delivery information; (f) verify delivery coverage where the necessary data is available.
+ | Customer SRS 5.5; CT-4.
+ | FR-CUS-20
+ | Review and Confirm Checkout
+ | The system shall present a final order review before the customer initiates online payment. Detailed: (a) identify the selected restaurant; (b) display all selected food items; (c) display quantities and customisations; (d) display the selected fulfilment method; (e) display delivery details or pickup information where applicable; (f) display the final amount payable; (g) the customer can return to the cart and make corrections; (h) revalidate item availability and prices before order submission; (i) ensure the checkout contains items from one restaurant only.
+ | Customer SRS 5.5; BR-CUS-02, BR-CUS-08.
+ | FR-CUS-21
+ | Make Online Payment
+ | The system shall allow customers to pay for orders using online payment methods supported by the platform. Detailed: (a) display the amount payable; (b) initiate the configured payment gateway process; (c) process verified payment results; (d) distinguish successful, failed, cancelled and pending payments where supported; (e) do not mark an order as paid merely because the customer returns from a payment page; (f) prevent duplicate successful charges from repeated checkout submissions.
+ | Customer SRS 5.5; BR-CUS-06; FR-SYS-02 to FR-SYS-04.
+ | FR-CUS-22
+ | Receive Order Confirmation
+ | The system shall provide customers with an order confirmation after an order has been successfully created. Detailed: (a) each order has a unique order reference; (b) the confirmation identifies the restaurant; (c) it summarises the selected items; (d) it displays the payment outcome; (e) it displays the order submission status; (f) customers can access their order details.
+ | Customer SRS 5.5; BR-CUS-02.
+ | Order tracking and management
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-23
+ | View Order Status and Track Orders
+ | The system shall allow customers to view the current status of their submitted orders. Detailed: (a) display order status information; (b) status labels may include placed, accepted, preparing, ready for pickup, out for delivery, completed or cancelled; (c) delivery orders display available delivery progress information; (d) pickup orders display when the food is ready for collection; (e) display the latest available status update; (f) customers can access detailed order information.
+ | Customer SRS 5.6; links to FR-MER-06, FR-DEL-5.1.
+ | FR-CUS-24
+ | View Order History and Details
+ | The system shall allow authenticated customers to view previously submitted orders. Detailed: (a) display previous order references; (b) restaurant names; (c) order dates and amounts; (d) order statuses; (e) customers can open individual orders; (f) detailed views display items, quantities, fulfilment methods and payment outcomes; (g) customers access only their own order history.
+ | Customer SRS 5.6.
+ | FR-CUS-25
+ | Cancel Orders Where Permitted
+ | The system shall allow customers to request order cancellation when permitted by the platform’s order-state rules. Detailed: (a) indicate whether cancellation is available; (b) request confirmation before submitting cancellation; (c) display the result of the request; (d) communicate applicable cancellation and refund conditions; (e) do not promise an automatic refund unless the refund process confirms that outcome.
+ | Customer SRS 5.6; OD-03, OD-04.
+ | FR-CUS-26
+ | View Payment History and Receipts
+ | The system shall allow customers to view payment information and access receipts for eligible transactions. Detailed: (a) display payment transaction references where available; (b) identify the related order; (c) display the amount paid; (d) distinguish successful and failed transactions; (e) customers can access receipts from orders or payment history.
+ | Customer SRS 5.6.
+ | Notifications, engagement, session and policies
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-CUS-27
+ | Receive Notifications
+ | The system shall notify customers of relevant account, payment and order events through configured notification channels. Detailed: (a) order confirmation notifications; (b) payment status notifications; (c) order status updates; (d) cancellation and refund notifications; (e) notifications contain relevant event information; (f) in-app notifications give access to the related order where supported.
+ | Customer SRS 5.7.
+ | FR-CUS-28
+ | Submit Restaurant Reviews and Ratings
+ | The system shall allow customers to rate and review restaurants when the platform’s eligibility requirements are satisfied. Detailed: (a) identify eligible orders; (b) customers can submit ratings; (c) customers may provide written feedback; (d) validate submitted ratings and review content; (e) prevent duplicate reviews where only one review per eligible order is permitted; (f) confirm successful submission.
+ | Customer SRS 5.7; OD-10.
+ | FR-CUS-29
+ | Contact Customer Support
+ | The system shall provide customers with access to available support channels. Detailed: (a) access support contact information; (b) submit enquiries where a support form is provided; (c) enquiries may relate to accounts, orders, payments or delivery; (d) confirm successful submission of a support request; (e) internal operational notes are not exposed to customers.
+ | Customer SRS 5.7.
+ | FR-CUS-30
+ | Manage Favourites
+ | The system shall allow authenticated customers to save and remove favourite restaurants or food items where this feature is enabled. Detailed: (a) add restaurants or items to favourites; (b) view saved favourites; (c) remove favourites; (d) favourite records belong to the authenticated customer; (e) identify unavailable favourite items as unavailable.
+ | Customer SRS 5.7; OD-10.
+ | FR-CUS-31
+ | Maintain Cart Consistency Across Sessions
+ | The system shall preserve the active cart across supported sessions and devices where cart persistence is enabled. Detailed: (a) retain cart items; (b) retain quantities and customisations; (c) retain the restaurant association; (d) revalidate item availability and pricing when the customer returns; (e) apply restaurant-switch rules consistently across supported devices; (f) communicate synchronisation failures to the customer.
+ | Customer SRS 5.7; OD-11.
+ | FR-CUS-32
+ | Manage Customer Session
+ | The system shall provide safeguards for customer session management. Detailed: (a) customers can sign out; (b) inactive sessions expire according to the security policy; (c) sensitive actions may require re-authentication; (d) customers cannot access another customer’s private information.
+ | Customer SRS 5.7.
+ | FR-CUS-33
+ | Access Terms and Policies
+ | The system shall make relevant terms, privacy information and ordering policies accessible to customers. Detailed: (a) customers can access applicable policies; (b) identify policy versions or effective dates where maintained; (c) present relevant payment, delivery, cancellation and refund conditions before order confirmation.
+ | Customer SRS 5.7.
+ | Table 3-B: Merchant (Restaurant) Functional Requirements (FR-MER)
+The source document words these as “the merchant should be able to…”; they are specified here as capabilities the system must provide to the merchant.
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-MER-01
+ | Account Management
+ | The merchant should be able to register, log in, log out and update their profile.
+ | Merchant doc FR01; registration is subject to FR-ADM-01 approval.
+ | FR-MER-02
+ | Restaurant Management
+ | The merchant should be able to add, edit and update restaurant information.
+ | Merchant doc FR02; feeds FR-CUS-06 and FR-CUS-08.
+ | FR-MER-03
+ | Menu Management
+ | The merchant should be able to add, edit and delete food and drink items.
+ | Merchant doc FR03; feeds FR-CUS-09.
+ | FR-MER-04
+ | Price Management
+ | The merchant should be able to set and update prices for menu items.
+ | Merchant doc FR04; prices are revalidated at checkout (FR-CUS-20).
+ | FR-MER-05
+ | Order Management
+ | The merchant should be able to view, accept, reject and manage customer orders.
+ | Merchant doc FR05; see use case in 3.4.
+ | FR-MER-06
+ | Order Tracking
+ | The merchant should be able to track order statuses, such as pending, preparing and completed.
+ | Merchant doc FR06; feeds FR-CUS-23.
+ | FR-MER-07
+ | Inventory Management
+ | The merchant should be able to monitor available food ingredients and stock levels.
+ | Merchant doc FR07.
+ | FR-MER-08
+ | Staff Management
+ | The merchant should be able to add, remove and assign roles to restaurant employees.
+ | Merchant doc FR08.
+ | FR-MER-09
+ | Payment Management
+ | The merchant should be able to view customer payments and payment statuses.
+ | Merchant doc FR09; relies on FR-SYS-03 and FR-SYS-04.
+ | FR-MER-10
+ | Sales Management
+ | The merchant should be able to view daily, weekly and monthly sales.
+ | Merchant doc FR10.
+ | FR-MER-11
+ | Customer Management
+ | The merchant should be able to view customer information and order history where permitted.
+ | Merchant doc FR11; limited by NFR-14 (privacy).
+ | FR-MER-12
+ | Discounts and Promotions
+ | The merchant should be able to create discounts and promotional offers.
+ | Merchant doc FR12; applied in FR-CUS-17.
+ | FR-MER-13
+ | Reports Generation
+ | The merchant should be able to generate reports on sales, orders, revenue and inventory.
+ | Merchant doc FR13.
+ | FR-MER-14
+ | Notifications
+ | The merchant should receive notifications when customers place new orders.
+ | Merchant doc FR14.
+ | FR-MER-15
+ | Restaurant Availability
+ | The merchant should be able to open, close or temporarily mark the restaurant as unavailable.
+ | Merchant doc FR15; enforced in FR-CUS-06.
+ | Table 3-C: Delivery Agent Mobile Application Functional Requirements (FR-DEL)
+The delivery agent application is a native mobile app (Android 8.0+ primary, iOS 15+ secondary). Priorities are as stated in the source document.
+Onboarding and identity; availability and connectivity
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-DEL-1.1
+ | Sign-up and KYC
+ | Phone + SMS OTP sign-up; upload of national ID, rider licence/vehicle papers and profile photo; selfie-to-ID match for KYC. (Priority: Must)
+ | Delivery doc FR-1; reviewed by FR-ADM-02.
+ | FR-DEL-1.2
+ | Verification Status
+ | Display verification status (Pending / Approved / Rejected); target turnaround ≤ 48 business hours. (Priority: Should)
+ | Delivery doc FR-1.
+ | FR-DEL-1.3
+ | Vehicle Declaration
+ | Declare vehicle type (motorcycle / bicycle / car) to filter available order types. (Priority: Must)
+ | Delivery doc FR-1.
+ | FR-DEL-1.4
+ | Terms and Consent
+ | Mandatory acceptance of terms and data-processing consent before activation. (Priority: Must)
+ | Delivery doc FR-1; NFR-15.
+ | FR-DEL-2.1
+ | Online/Offline Toggle
+ | One-tap Online/Offline toggle on the home screen; going Online starts adaptive location transmission. (Priority: Must)
+ | Delivery doc FR-2; CT-2.
+ | FR-DEL-2.2
+ | Offline Mid-Run
+ | Going offline mid-run must not remove the active order; the rider completes it locally and syncs on reconnection. (Priority: Must)
+ | Delivery doc FR-2; CT-1.
+ | FR-DEL-2.3
+ | Connectivity Indicator
+ | Persistent connectivity indicator and last-successful-sync timestamp. (Priority: Must)
+ | Delivery doc FR-2.
+ | Dispatch offers
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-DEL-3.1
+ | Real-Time Offer Push
+ | Real-time offer push via WebSocket when foregrounded; high-priority “rings like a call” notification when backgrounded or locked. (Priority: Must)
+ | Delivery doc FR-3; PR-06, NFR-24.
+ | FR-DEL-3.2
+ | Offer Details
+ | Every offer shows net earnings, pickup distance, drop-off distance and payment type (prepaid vs. COD) before acceptance. (Priority: Must)
+ | Delivery doc FR-3; CT-3.
+ | FR-DEL-3.3
+ | Time-Boxed Offers
+ | Offers are time-boxed (default 30 s) with a visible countdown; expiry enters a first-come-first-serve pool for nearby Buea riders. (Priority: Must)
+ | Delivery doc FR-3; NFR-62 (remote config).
+ | FR-DEL-3.4
+ | Slide-to-Accept
+ | Slide-to-accept to prevent accidental acceptance; acceptance directly from the lock screen. (Priority: Must)
+ | Delivery doc FR-3.
+ | Navigation and Buea-specific addressing
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-DEL-4.1
+ | Turn-by-Turn Navigation
+ | Turn-by-turn navigation to pickup then drop-off; display total run distance and suggested departure time. (Priority: Must)
+ | Delivery doc FR-4.
+ | FR-DEL-4.2
+ | Landmark Notes
+ | Landmark notes displayed prominently above the map. Buea’s street addressing is unreliable and Google Maps coverage is incomplete across many neighbourhoods (Molyko, Bonduma, Great Soppo, Bokwango, Mile 17). (Priority: Must)
+ | Delivery doc FR-4; CT-4; FR-SYS-06.
+ | FR-DEL-4.3
+ | Call and WhatsApp Buttons
+ | One-tap call and WhatsApp deep-link buttons on every active delivery screen; the phone call is the primary last-mile navigation aid in Buea. (Priority: Must)
+ | Delivery doc FR-4; DC-07.
+ | FR-DEL-4.4
+ | Plus Codes Fallback
+ | Plus Codes (Open Location Code) as an offline-capable fallback address format, usable when GPS pins are 50–100 m off. (Priority: Should)
+ | Delivery doc FR-4; CT-4.
+ | FR-DEL-4.5
+ | Manual Pin Correction
+ | Manual pin correction on arrival; the corrected pin persists for that customer’s future orders. (Priority: Should)
+ | Delivery doc FR-4; FR-SYS-07.
+ | FR-DEL-4.6
+ | Offline Navigation
+ | Offline navigation using cached map tiles for previously travelled Buea routes. (Priority: Should)
+ | Delivery doc FR-4; CT-1.
+ | Order lifecycle and proof of delivery
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-DEL-5.1
+ | Order State Actions
+ | State actions: Arrived at Pickup → Confirm Pickup → Arrived at Drop-off → Complete Delivery; completion is blocked until proof of delivery (POD) is captured. (Priority: Must)
+ | Delivery doc FR-5; FR-SYS-01.
+ | FR-DEL-5.2
+ | Failure Reporting
+ | Structured failure reporting with Buea-relevant reason codes (customer unreachable, landmark/address mismatch, refused, restaurant issue). (Priority: Must)
+ | Delivery doc FR-5.
+ | FR-DEL-5.3
+ | Restaurant Wait Timer
+ | On-site wait timer at the restaurant; after 10 minutes, surface a “Contact Support” escalation action. (Priority: Should)
+ | Delivery doc FR-5.
+ | FR-DEL-6.1
+ | Photo POD
+ | Photo capture as primary POD, geo-tagged and timestamped. (Priority: Must)
+ | Delivery doc FR-6.
+ | FR-DEL-6.2
+ | OTP Verification
+ | OTP verification (4-digit) mandatory for COD and high-value orders. (Priority: Must)
+ | Delivery doc FR-6; CT-3.
+ | FR-DEL-6.3
+ | Digital Signature
+ | Digital signature capture for formal/business handovers. (Priority: Should)
+ | Delivery doc FR-6.
+ | FR-DEL-6.4
+ | Offline-First POD
+ | Pickup/drop-off confirmation, signature, photo and cash collection all complete without connectivity and are queued locally for sync. (Priority: Must)
+ | Delivery doc FR-6; DC-06; NFR-23.
+ | FR-DEL-6.5
+ | Sync Status and Idempotency
+ | Per-artifact sync status (Pending / Synced / Failed) with manual retry; idempotency keys prevent duplicate records on replay. (Priority: Must)
+ | Delivery doc FR-6; FR-SYS-02.
+ | FR-DEL-6.6
+ | Per-Delivery Caps
+ | Caps per delivery: 50 photos/signatures and 200 barcode records. (Priority: Info)
+ | Delivery doc FR-6.
+ | Earnings, wallet and cash; ratings and support
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-DEL-7.1
+ | Run History
+ | Dated run history showing net earnings, cash collected and fund destination. (Priority: Must)
+ | Delivery doc FR-7.
+ | FR-DEL-7.2
+ | Rider Wallet
+ | Rider wallet crediting prepaid runs at handover. (Priority: Must)
+ | Delivery doc FR-7.
+ | FR-DEL-7.3
+ | Wallet-Backed COD
+ | COD backed by wallet balance: the rider tops up via MTN MoMo / Orange Money; low balance restricts offers to prepaid runs only. (Priority: Must)
+ | Delivery doc FR-7; CT-3, CT-5; FR-SYS-05.
+ | FR-DEL-7.4
+ | Withdrawals
+ | Withdrawal requests to MoMo, Orange Money or bank, processed within 24 business hours. (Priority: Must)
+ | Delivery doc FR-7; CT-5.
+ | FR-DEL-7.5
+ | Earnings Dashboard
+ | Earnings dashboard (daily / weekly / monthly) including tips, bonuses, deductions and commission rate per run. Buea benchmark: delivery workers currently earn roughly 2,000–8,000 FCFA/day (average about 4,000 FCFA). (Priority: Must)
+ | Delivery doc FR-7.
+ | FR-DEL-8.1
+ | Rider Performance
+ | Display aggregate rating, completion rate, on-time percentage and recent customer feedback. (Priority: Should)
+ | Delivery doc FR-8.
+ | FR-DEL-8.2
+ | Contact Support
+ | One-tap “Contact Support” from every active screen (chat / phone / WhatsApp) with order context auto-attached. (Priority: Must)
+ | Delivery doc FR-8.
+ | FR-DEL-8.3
+ | Safety Incident Reporting
+ | Safety incident reporting (accident, theft, harassment) with an emergency priority flag. (Priority: Must)
+ | Delivery doc FR-8.
+ | FR-DEL-8.4
+ | Incentives
+ | Performance-based bonus/incentive surfacing. (Priority: Could)
+ | Delivery doc FR-8.
+ | Table 3-D: System Administrator Functional Requirements (FR-ADM)
+The administrator module supports the following functions, accessed mainly through the administrative web dashboard.
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-ADM-01
+ | Merchant Application Review
+ | The system shall provide an interface for the administrator to view pending merchant applications, inspect uploaded business documents (such as permits or tax ID), and either approve or reject the application with a note explaining the reason.
+ | Admin doc; gates FR-MER-01.
+ | FR-ADM-02
+ | Delivery Rider Verification
+ | The system shall enable administrators to review rider applications, verify identity documents (national ID, bike registration and possibly driver’s licence), and approve or deny the application with a reason note.
+ | Admin doc; gates FR-DEL-1.1 and FR-DEL-1.2.
+ | FR-ADM-03
+ | User and Account Management
+ | The administrator shall be able to view, search, update status (active, temporarily suspended or permanently banned) and reset credentials for any user account across all roles (customers, merchants, riders, admins).
+ | Admin doc.
+ | FR-ADM-04
+ | Catalog and Content Moderation
+ | The administrator shall be able to review, flag, edit or remove inappropriate or prohibited menu items, products or restaurant listings reported by users or automated filters.
+ | Admin doc.
+ | FR-ADM-05
+ | Order Override and Dispute Resolution
+ | In cases of delivery delays or failure, cancellations, or customer/merchant/deliverer disputes, the administrator shall be able to view order logs, view live location updates, issue manual refunds, reassign orders or adjust wallet balances.
+ | Admin doc; actions are audit-logged (NFR-11).
+ | FR-ADM-06
+ | Platform Analytics and Reporting
+ | The system shall provide a dashboard displaying key performance indicators: total active orders, daily active users, total gross merchandise value (total value of all completed or ongoing transactions), platform commission earnings and delivery times.
+ | Admin doc.
+ | FR-ADM-07
+ | System Configuration and Settings
+ | The administrator shall be able to configure global platform parameters such as categories, default delivery radius, base commission percentages for merchants and baseline delivery fee calculations.
+ | Admin doc; feeds FR-CUS-17 and FR-DEL-7.5.
+ | Table 3-E: System-Wide Functional Requirements (FR-SYS)
+These cross-cutting requirements are derived from the Project Synopsis (technical direction and non-negotiables). They apply to every actor.
+ID
+ | Feature
+ | Description
+ | Source / Rationale
+ | FR-SYS-01
+ | Order State Machine
+ | Every order state transition shall be idempotent, versioned and event-emitting.
+ | Synopsis; DC-03. Duplicate charges and phantom deliveries are engineering failures.
+ | FR-SYS-02
+ | Idempotency on Mutating Endpoints
+ | Every mutating endpoint shall be idempotent: a repeated request carrying the same idempotency key shall return the original result without creating a second order, charge or record.
+ | Synopsis non-negotiable 2; mobile networks drop mid-request.
+ | FR-SYS-03
+ | Payment Adapter Layer
+ | MTN MoMo and Orange Money payments, wallet top-ups and payouts shall be accessed through one adapter interface so that providers can be added or replaced without changing order logic.
+ | Synopsis; DC-04; CT-5.
+ | FR-SYS-04
+ | UNKNOWN Payment State
+ | When a payment request fails mid-flight (for example the network drops), the payment shall be marked UNKNOWN. An UNKNOWN payment shall never trigger a refund; it shall trigger reconciliation against the provider.
+ | Synopsis; DC-05.
+ | FR-SYS-05
+ | COD Reconciliation
+ | Cash on delivery shall be backed by the rider wallet so that riders never carry unbacked cash risk, and cash collected shall be reconciled daily against the order records.
+ | Synopsis; CT-3; FR-DEL-7.3.
+ | FR-SYS-06
+ | Mandatory Landmark Note
+ | Delivery addresses shall include a landmark note as a required field (not optional), shown to the rider with the order.
+ | Synopsis; CT-4; applies to FR-CUS-05 and FR-CUS-19.
+ | FR-SYS-07
+ | Address Asset
+ | Pin corrections made by riders shall persist and accumulate into a proprietary address dataset used to improve future navigation.
+ | Synopsis; DC-07; FR-DEL-4.5.
+ | FR-SYS-08
+ | Regulatory Gating
+ | No live transaction shall be processed until ART/ANTIC certification is obtained and NECAP interconnection is in place; payment and SMS adapters shall report to NECAP in real time.
+ | Synopsis non-negotiable 1; CT-7; NFR-17.
+ | FR-SYS-09
+ | Event Fan-Out
+ | Order and payment state changes shall be published as events through a queue to the notification, merchant, rider, analytics and audit consumers.
+ | Synopsis; DC-02; supports FR-CUS-27, FR-MER-14 and FR-DEL-3.1.
+ | 3.1 Possible Outcomes per Functional Requirement
+Each functional requirement has at minimum two possible outcomes: a success path (requirement satisfied) and a failure or degraded path (requirement not met or partially met). The table captures the most critical outcome pairs for each group of related requirements.
+Requirements
+ | Feature group
+ | Success Outcome
+ | Failure / Degraded Outcome
+ | FR-CUS-01 to 05
+ | Customer registration and account
+ | Account created or updated; saved addresses available at checkout.
+ | Invalid or duplicate data rejected with field-level messages; sign-in errors never reveal whether an account exists.
+ | FR-CUS-06 to 08
+ | Restaurant discovery
+ | Matching restaurants listed with operating status and service conditions.
+ | No match: a clear message is shown; closed restaurants are shown but cannot be checked out.
+ | FR-CUS-09 to 11
+ | Menu browsing and options
+ | Items, options and final price shown; selection added to cart.
+ | Unavailable item is flagged and cannot be added; incomplete mandatory options block the addition.
+ | FR-CUS-12 to 17
+ | Cart management
+ | Single-restaurant cart with correct totals.
+ | Item from another restaurant triggers the warning; cancelling keeps the cart unchanged; the server rejects any multi-restaurant cart.
+ | FR-CUS-18 to 22
+ | Fulfilment, checkout and payment
+ | Verified payment produces an order with a unique reference and confirmation.
+ | Failed or cancelled payment: order not marked paid; pending or UNKNOWN payment goes to reconciliation; repeated submissions produce one charge only.
+ | FR-CUS-23 to 26
+ | Tracking, history, cancellation, receipts
+ | Live status, history and receipts shown; permitted cancellations processed.
+ | Delayed updates: latest known status shown with its time; cancellation unavailable is explained; no automatic refund is promised.
+ | FR-CUS-27 to 33
+ | Notifications, reviews, support, favourites, cart persistence, session, policies
+ | Notifications delivered; review saved once per eligible order; cart restored on return.
+ | Notification failure is queued and retried; synchronisation failure is communicated; expired session requires sign-in.
+ | FR-MER-01 to 04, 07, 15
+ | Merchant account, restaurant, menu, price, inventory, availability
+ | Changes saved and reflected to customers.
+ | Invalid data rejected; a closed or unavailable restaurant cannot receive orders.
+ | FR-MER-05, 06, 14
+ | Merchant orders, tracking, notifications
+ | New order notified; accepted or rejected; status updated; customer notified.
+ | Notification missed: the order remains in the pending queue; rejected order triggers customer notification and refund process.
+ | FR-MER-08 to 13
+ | Staff, payments, sales, customers, promotions, reports
+ | Role-based staff access; payment status, sales, reports and promotions available.
+ | Unauthorised role is denied; customer data beyond permitted scope is not shown.
+ | FR-DEL-1.1 to 1.4
+ | Rider onboarding
+ | Documents uploaded, KYC matched, approved within 48 business hours, consent recorded.
+ | Rejected with reason; pending status visible; activation blocked until consent is accepted.
+ | FR-DEL-2.1 to 2.3
+ | Availability and connectivity
+ | Rider goes Online and location is transmitted adaptively.
+ | Connectivity lost: active run continues locally; indicator and last-sync time show the state.
+ | FR-DEL-3.1 to 3.4
+ | Dispatch offers
+ | Offer rings, is accepted by slide within the countdown.
+ | Offer expires and enters the first-come-first-serve pool; delayed push beyond target is logged and alerted.
+ | FR-DEL-4.1 to 4.6
+ | Navigation and addressing
+ | Route, landmark note and call button lead the rider to the customer.
+ | GPS pin 50–100 m off or tiles missing: rider calls the customer, uses the landmark note or Plus Code, and corrects the pin.
+ | FR-DEL-5.1 to 5.3
+ | Order lifecycle
+ | Each state action recorded; delivery completed after POD.
+ | Failure reason code recorded; restaurant wait over 10 minutes surfaces escalation to support.
+ | FR-DEL-6.1 to 6.6
+ | Proof of delivery
+ | Photo, OTP and signature captured and synced.
+ | Offline: artifacts queue as Pending; sync failure shows Failed with manual retry; replays create no duplicates; wrong OTP blocks COD completion.
+ | FR-DEL-7.1 to 7.5
+ | Earnings, wallet and cash
+ | Wallet credited, run history and earnings shown, withdrawal processed within 24 business hours.
+ | Low wallet balance restricts offers to prepaid runs; withdrawal delay is shown as pending.
+ | FR-DEL-8.1 to 8.4
+ | Ratings and support
+ | Performance shown; support and incident reports reach the operations team with order context.
+ | Support channel unreachable offline: report is queued and flagged for sync.
+ | FR-ADM-01, 02
+ | Application review
+ | Application approved or rejected with a reason note; applicant notified.
+ | Missing or illegible documents: rejection with reason; decision is audit-logged.
+ | FR-ADM-03, 04
+ | Account management and moderation
+ | Account status changed, credentials reset, listing edited or removed.
+ | Insufficient permission denied; every action recorded in the audit log.
+ | FR-ADM-05
+ | Order override and disputes
+ | Refund issued, order reassigned or wallet adjusted after reviewing logs and live location.
+ | Conflicting action on an order in a terminal state is rejected.
+ | FR-ADM-06, 07
+ | Analytics and configuration
+ | KPIs displayed; parameters saved and applied platform-wide.
+ | No data yet: empty state shown; invalid parameter value rejected.
+ | FR-SYS-01 to 05
+ | Order state machine, idempotency, payments, COD
+ | Transitions are versioned and idempotent; reconciled payments and cash match the order records.
+ | Duplicate request returns the original result; UNKNOWN payment is reconciled, not refunded; unbacked COD is blocked.
+ | FR-SYS-06 to 09
+ | Landmarks, address asset, regulation, events
+ | Landmark note present; corrected pins reused; transactions reported to NECAP; events delivered.
+ | Missing landmark blocks checkout; unreported transactions are not permitted to go live; event delivery retried.
+ | 3.2 Input–Output Relationships
+The table summarises the primary input stimuli and expected system outputs for the core functional features.
+Feature
+ | Input
+ | Output
+ | Registration and sign-in
+ | Registration data, credentials, OTP
+ | Account created or session started; errors without account disclosure
+ | Restaurant discovery
+ | Search terms, filters
+ | Restaurant list with status and service conditions
+ | Menu and item options
+ | Selected restaurant and item, chosen options
+ | Item details with calculated price
+ | Cart
+ | Item, quantity, options, restaurant
+ | Single-restaurant cart with recalculated totals; switch warning when needed
+ | Restaurant switch
+ | Customer confirm or cancel
+ | Cart cleared and replaced, or preserved unchanged
+ | Checkout
+ | Fulfilment method, address (with landmark note), payment method
+ | Revalidated summary; payment request through the adapter
+ | Payment
+ | Provider callback or status query
+ | Verified outcome (success, failed, cancelled, pending, UNKNOWN) and order creation
+ | Order tracking
+ | Order state events
+ | Updated status and delivery progress for the customer and merchant
+ | Merchant order handling
+ | Accept or reject action
+ | Order status updated; customer notified; rider dispatch triggered
+ | Merchant catalogue
+ | Menu, price, stock, availability edits
+ | Updated customer-facing menu and restaurant status
+ | Rider onboarding
+ | Phone, OTP, ID, licence, selfie
+ | Verification status (Pending / Approved / Rejected)
+ | Online toggle
+ | Rider tap
+ | Adaptive location transmission starts or stops
+ | Dispatch offer
+ | Order ready for dispatch, nearby riders
+ | Push offer with earnings, distances, payment type and countdown
+ | Navigation
+ | Order addresses, landmark notes, GPS
+ | Route, landmark note, call and WhatsApp actions
+ | Pin correction
+ | Rider’s corrected location
+ | Persisted pin for the customer’s future orders
+ | Order lifecycle
+ | State action and POD artifacts
+ | Versioned order transition; queued locally when offline
+ | Offline sync
+ | Connectivity restored
+ | Queued actions and artifacts uploaded idempotently; per-artifact status updated
+ | Wallet and cash
+ | COD collection, top-up, withdrawal request
+ | Wallet balance and history updated; offer eligibility changed
+ | Admin application review
+ | Submitted documents
+ | Approve or reject decision with note; applicant status updated
+ | Admin dispute handling
+ | Order logs, live location
+ | Refund, reassignment or wallet adjustment; audit record created
+ | Admin analytics
+ | Platform data
+ | KPI dashboard (active orders, daily active users, GMV, commission, delivery times)
+ | Admin configuration
+ | Parameter values
+ | Updated categories, delivery radius, commission and delivery fee rules
+ | Reviews and support
+ | Rating, text, enquiry
+ | Stored review; support ticket with confirmation
+ | 3.3 Data and Validation Rules
+3.3.1 Cart Data Constraints
+A non-empty active cart shall have exactly one restaurant association.
+Every cart item shall reference a menu item belonging to the cart’s associated restaurant.
+The system shall reject any cart containing items from multiple restaurants.
+Cart items shall retain their item identities, quantities, selected options and relevant price information.
+Item availability and prices shall be revalidated before order submission.
+3.3.2 Restaurant-Switch Workflow
+The customer has an active cart containing items from Restaurant A.
+The customer navigates to Restaurant B.
+The customer attempts to add an item from Restaurant B to the cart.
+The system detects that Restaurant B differs from the restaurant associated with the active cart.
+The system displays a warning requesting confirmation to clear the existing cart and switch restaurants.
+If the customer cancels, the existing Restaurant A cart remains unchanged.
+If the customer confirms, the system clears the old cart.
+The system associates the new cart with Restaurant B.
+The system adds the attempted Restaurant B item.
+The system displays the updated cart.
+3.3.3 Order Data Constraints
+Every order shall reference exactly one restaurant.
+Every order item shall belong to the restaurant referenced by the order.
+The order shall preserve the item and price information applicable at the time of submission.
+The order shall store the selected fulfilment method.
+The order shall contain the necessary pickup or delivery information, including the landmark note for delivery (FR-SYS-06).
+The order shall be linked to the customer and the relevant payment transaction.
+3.3.4 Delivery Agent Data Constraints
+A delivery shall hold at most 50 photos/signatures and 200 barcode records (FR-DEL-6.6).
+Every mutating request from the rider app shall carry an idempotency key so that replays after reconnection create no duplicate records (FR-DEL-6.5, FR-SYS-02).
+The vehicle type declared at onboarding determines which order types are offered (FR-DEL-1.3).
+The corrected pin of a customer’s address is stored against that customer for future orders (FR-DEL-4.5, FR-SYS-07).
+3.4 Example Use Cases
+Use case 1: Manage Customer Orders (Merchant)
+Use-case element
+ | Description
+ | Actor
+ | Restaurant Merchant
+ | Precondition
+ | The merchant must be logged into the system.
+ | Main flow
+ | 1. The merchant opens the dashboard. 2. The merchant navigates to the orders section. 3. The system displays incoming customer orders. 4. The merchant selects an order. 5. The merchant accepts or rejects the order. 6. The system updates the order status. 7. The customer receives an order-status notification.
+ | Postcondition
+ | The order status is successfully updated.
+ | Use case 2: Complete a Delivery With No Signal (Delivery Agent) — derived from FR-DEL-2.2, 5.1, 6.1 to 6.5 and FR-SYS-02.
+Use-case element
+ | Description
+ | Actor
+ | Delivery Agent
+ | Precondition
+ | The rider is Online, has accepted an offer and holds an active order on the device.
+ | Main flow
+ | 1. Connectivity is lost; the indicator shows offline and the last-sync time. 2. The rider confirms pickup locally. 3. The rider navigates using cached tiles, the landmark note and the call button. 4. The rider arrives and captures the photo POD; for COD the customer’s 4-digit OTP is verified and cash is collected. 5. The rider completes delivery; every action is queued locally with an idempotency key. 6. Connectivity returns; the queue syncs and each artifact moves from Pending to Synced.
+ | Alternate flow
+ | A sync attempt fails: the artifact shows Failed and the rider can retry manually; replays create no duplicate records.
+ | Postcondition
+ | The order is completed on the server, the wallet is credited or cash reconciled, and the customer and merchant are notified.
+ | 4. User Interface Requirements
+This section describes how the Platform interacts with its users and with other software systems. Because the Platform must be usable by first-time customers, busy restaurant staff and delivery agents working one-handed on motorcycles, the interface design must be simple, consistent and self-explanatory, with English as the default locale and French as a supported locale.
+4.1 Software Interfaces
+4.1.1 Client Platform APIs
+The following platform interfaces are indicative and will be confirmed in the architecture sprint.
+Delivery agent app (Android, primary): fused location provider and a foreground service with location type for background GPS (NFR-53); high-priority push for “rings like a call” offers; background work scheduler for queued sync; camera for geo-tagged photo POD; telephony and WhatsApp deep links for one-tap contact; local SQLite storage.
+Delivery agent app (iOS, secondary, 15+): core location, background tasks, push notifications and local storage, with the same business rules.
+Customer and merchant clients: supported browsers and mobile device classes (to be fixed under OD-09 and OD-16), responsive across mobile, tablet and desktop.
+Administrator dashboard: supported desktop browsers with multi-factor authentication.
+4.1.2 Backend REST API and WebSocket
+The clients communicate with the backend over HTTPS. All payloads are JSON-encoded, authentication uses bearer tokens, and TLS 1.2+ is mandatory on all endpoints. Every mutating request carries an idempotency key (FR-SYS-02). Offers are pushed to riders over WebSocket while foregrounded (FR-DEL-3.1). The contract below is indicative.
+Actor
+ | Method and path (indicative)
+ | Purpose
+ | Customer
+ | POST /auth/register, POST /auth/login, POST /auth/password-reset
+ | Registration, sign-in, recovery (FR-CUS-01 to 03)
+ | Customer
+ | GET /restaurants, GET /restaurants/{id}/menu
+ | Discovery, search, filters and menu (FR-CUS-06 to 11)
+ | Customer
+ | PUT /cart/items, DELETE /cart, POST /checkout
+ | Cart, restaurant switch, checkout (FR-CUS-12 to 20)
+ | Customer
+ | POST /payments, GET /orders/{id}, POST /orders/{id}/cancel
+ | Payment, tracking, cancellation (FR-CUS-21 to 25)
+ | Merchant
+ | GET /merchant/orders, POST /merchant/orders/{id}/accept or reject
+ | Order handling (FR-MER-05, 06)
+ | Merchant
+ | PUT /merchant/menu/items/{id}, PUT /merchant/availability
+ | Menu, price, stock, open/closed (FR-MER-03, 04, 07, 15)
+ | Rider
+ | POST /rider/otp, POST /rider/kyc
+ | OTP sign-up and KYC documents (FR-DEL-1.1)
+ | Rider
+ | PUT /rider/availability, WebSocket /rider/offers
+ | Online/Offline and dispatch offers (FR-DEL-2.1, 3.1)
+ | Rider
+ | POST /rider/orders/{id}/transitions, POST /rider/orders/{id}/pod
+ | Lifecycle actions and POD (FR-DEL-5.1, 6.x)
+ | Rider
+ | POST /rider/sync
+ | Batch replay of the offline queue (FR-DEL-6.4, 6.5)
+ | Rider
+ | GET /rider/wallet, POST /rider/wallet/topups, POST /rider/wallet/withdrawals
+ | Wallet, top-up and withdrawal (FR-DEL-7.x)
+ | Admin
+ | GET /admin/applications, POST /admin/applications/{id}/decision
+ | Merchant and rider verification (FR-ADM-01, 02)
+ | Admin
+ | PATCH /admin/users/{id}/status, POST /admin/orders/{id}/refunds
+ | Account control and dispute actions (FR-ADM-03, 05)
+ | Admin
+ | GET /admin/analytics, PUT /admin/settings
+ | KPIs and configuration (FR-ADM-06, 07)
+ | 4.1.3 Local Database (Delivery Agent App)
+SQLite is used for local persistence on the rider device. The schema stores the active order, queued actions with idempotency keys, POD artifacts with per-artifact sync status (Pending / Synced / Failed), cached map tiles for previously travelled Buea routes, cached landmark notes and corrected pins, remote configuration values, and the last-successful-sync timestamp. ID documents and photos are encrypted at rest (NFR-03).
+4.1.4 External Service Interfaces
+Service
+ | Interface requirement
+ | MTN MoMo and Orange Money
+ | Accessed only through the payment adapter (FR-SYS-03) for customer payment, rider top-up and payouts; verified results only (FR-CUS-21); UNKNOWN state reconciled (FR-SYS-04).
+ | SMS and push notification providers
+ | OTP (rider sign-up, COD delivery OTP), customer, merchant and rider notifications; queued and retried (NFR-27); reported to NECAP in real time (FR-SYS-08).
+ | NECAP / ART / ANTIC
+ | Real-time transaction reporting and certification before the first live transaction.
+ | Maps, Plus Codes and WhatsApp
+ | Turn-by-turn navigation, Open Location Code fallback and WhatsApp deep links (FR-DEL-4.x).
+ | Server data stores
+ | PostgreSQL (orders and payments), Redis (geospatial index and idempotency keys) and an event queue (DC-02).
+ | 4.2 User Interface Examples
+The following screens describe the key user-facing interfaces for each actor.
+4.2.1 Customer (Web and Mobile)
+Screen C1 – Restaurant Discovery: search field, filters (cuisine, location, availability), restaurant cards with image, cuisine and an open or closed badge (FR-CUS-06, 07).
+Screen C2 – Restaurant and Menu: restaurant details, delivery coverage and minimum order, categorised menu, unavailable items greyed out, item options sheet with live price (FR-CUS-08 to 11).
+Screen C3 – Cart and Restaurant-Switch Warning: cart showing its restaurant, quantity controls and totals; a dialog explaining that one order can contain items from only one restaurant, with Confirm and Cancel buttons (FR-CUS-12 to 17).
+Screen C4 – Checkout and Payment: fulfilment choice, saved address with required landmark note, final order review and amount payable, payment method selection and result (FR-CUS-18 to 22).
+Screen C5 – Order Tracking: status timeline (placed to completed), delivery progress, cancel option where permitted, receipt access (FR-CUS-23 to 26).
+Screen C6 – Account: profile, saved addresses, order and payment history, favourites, support form, policies and notification list (FR-CUS-04, 05, 27 to 33).
+4.2.2 Merchant (Browser Dashboard)
+Screen M1 – Order Dashboard: incoming orders with an audible and visual alert, Accept and Reject actions, status columns (pending, preparing, completed), open/closed toggle (FR-MER-05, 06, 14, 15).
+Screen M2 – Menu, Price and Inventory: item editor, price fields, stock levels, staff and role assignment (FR-MER-03, 04, 07, 08).
+Screen M3 – Business Insights: payments and statuses, daily, weekly and monthly sales, promotions, customer history where permitted and report export (FR-MER-09 to 13).
+4.2.3 Delivery Agent (Native Mobile App)
+Screen D1 – Onboarding and KYC: OTP sign-up, document and selfie upload, vehicle type, terms and consent, verification status (FR-DEL-1.1 to 1.4).
+Screen D2 – Home: one-tap Online/Offline toggle, persistent connectivity indicator and last-sync time (FR-DEL-2.1 to 2.3).
+Screen D3 – Offer: full-screen ring-style card with net earnings, pickup and drop-off distance, prepaid or COD badge, 30-second countdown and slide-to-accept (FR-DEL-3.1 to 3.4).
+Screen D4 – Active Delivery: landmark note above the map, large Call and WhatsApp buttons, Arrived/Confirm/Complete actions, restaurant wait timer, Contact Support and failure reasons (FR-DEL-4.x, 5.x, 8.2).
+Screen D5 – Proof of Delivery: photo capture, OTP entry for COD, signature pad, per-artifact sync status with retry (FR-DEL-6.x).
+Screen D6 – Earnings and Wallet: run history, daily/weekly/monthly earnings, wallet balance, top-up, withdrawal, rating and incentives (FR-DEL-7.x, 8.1, 8.4).
+All rider screens use tap targets of at least 60 × 60 px, high-contrast icon-first design with captions, voice cues for critical transitions and at most two text inputs per delivery (NFR-40 to 46).
+4.2.4 System Administrator (Web Dashboard)
+Screen A1 – Verification Queue: pending merchant and rider applications, document viewer, Approve and Reject with a mandatory reason note (FR-ADM-01, 02).
+Screen A2 – Accounts and Moderation: user search across all roles, status change (active, suspended, banned), credential reset, reported-content review (FR-ADM-03, 04).
+Screen A3 – Dispute Console: order log, live rider location, refund, reassign and wallet-adjust actions (FR-ADM-05).
+Screen A4 – Analytics: active orders, daily active users, GMV, commission earnings, delivery times (FR-ADM-06).
+Screen A5 – Settings: categories, default delivery radius, base commission, baseline delivery fee (FR-ADM-07). Access requires multi-factor authentication (NFR-01).
+5. Performance Requirements
+Performance requirements define measurable criteria the system must meet in terms of response time, battery, data use and scalability. They are informed by the operating conditions of Buea: low-end Android devices, intermittent connectivity, scarce battery and costly mobile data (CT-1, CT-2, CT-6).
+ID
+ | Category
+ | Requirement
+ | Priority
+ | Source ID
+ | PR-01
+ | Response Time – Restaurant Discovery
+ | The system should return restaurant search results within 3 seconds for at least 95% of requests under the agreed normal test load.
+ | Medium
+ | NFR-CUS-01
+ | PR-02
+ | Response Time – Menu and Cart
+ | The system should load restaurant menus and complete ordinary cart operations within 2 seconds for at least 95% of requests under normal test load.
+ | Medium
+ | NFR-CUS-02
+ | PR-03
+ | Response Time – Checkout
+ | The system should acknowledge valid checkout submissions within 5 seconds, excluding processing time attributable to external payment providers.
+ | Medium
+ | NFR-CUS-03
+ | PR-04
+ | Response Time – Merchant System
+ | The system should respond to merchant requests within a reasonable time, ideally within 2–3 seconds under normal load.
+ | Medium
+ | NFR-MER-02
+ | PR-05
+ | Startup Time
+ | Cold start of the rider app on low-end Android (1–2 GB RAM), typical of Buea rider devices, shall take less than 3 seconds.
+ | High
+ | NFR-DEL-P-1
+ | PR-06
+ | Response Time – Offer Notification
+ | Offer notification latency (server send to device display) shall be under 2 seconds at the 95th percentile.
+ | High
+ | NFR-DEL-P-2
+ | PR-07
+ | Location Throughput
+ | Adaptive GPS interval: 5 seconds while moving, 30 seconds while stopped, 60 seconds while idle.
+ | High
+ | NFR-DEL-P-3
+ | PR-08
+ | Battery
+ | Battery drain per delivery shall be under 5% (target), with a 10% hard ceiling.
+ | High
+ | NFR-DEL-P-4
+ | PR-09
+ | Data Usage
+ | Data usage per delivery, excluding photo uploads, shall be under 5 MB.
+ | High
+ | NFR-DEL-P-5
+ | PR-10
+ | Map Rendering
+ | The map shall re-render only on movement above 50 m; map tiles shall be cached.
+ | High
+ | NFR-DEL-P-6
+ | PR-11
+ | Scalability – Rider Locations
+ | The backend shall handle 1,000 concurrent rider locations at launch, scaling linearly to 10,000.
+ | High
+ | NFR-DEL-P-7
+ | PR-12
+ | Scalability – Customer Platform
+ | The architecture should support growth in customers, restaurants, menu items and concurrent orders without violating agreed performance targets.
+ | Medium
+ | NFR-CUS-17
+ | PR-13
+ | Scalability – Merchant Platform
+ | The system should support business growth, including more customers, employees and orders.
+ | Medium
+ | NFR-MER-06
+ | 5.1 Throughput Targets
+Throughput is defined as the volume of location and order events the system processes. The figures below follow directly from the adaptive intervals in PR-07:
+Moving rider: one location update every 5 seconds, which equals 12 updates per minute or 720 per hour.
+Stopped rider: one update every 30 seconds, which equals 120 per hour.
+Idle rider: one update every 60 seconds, which equals 60 per hour.
+Offer window: 30 seconds by default, configurable remotely (NFR-62), with delivery of the offer within 2 seconds at the 95th percentile (PR-06).
+Data budget: under 5 MB per delivery excluding photo uploads (PR-09); photo and signature uploads are capped at 50 per delivery (FR-DEL-6.6).
+Launch volume: 5–10 riders and 10–15 restaurants in a 3 km radius, which is far below the 1,000-rider design capacity in PR-11.
+5.2 Scalability
+The rider client is stateless with respect to multi-user concurrency; scalability applies primarily to the backend. The system shall:
+Start as a modular monolith and be decomposed into services only when order density demands it (DC-01).
+Use Redis for geospatial indexing and idempotency, PostgreSQL for orders and payments, and a queue for event fan-out (DC-02) so that growth does not require redesign.
+Scale rider-location handling linearly from 1,000 to 10,000 concurrent riders (PR-11).
+Allow additional payment, notification and map providers without a complete redesign (NFR-58).
+Degrade gracefully when the backend is temporarily unavailable: clients queue and retry rather than fail hard (NFR-25).
+6. Non-Functional Attributes
+Non-functional attributes define the quality standards and operational constraints the Platform must satisfy. Performance-related requirements are in Section 5; the remaining requirements from all four actor documents are consolidated below and grouped by quality category. The Source ID column gives the original identifier in the actor document (CUS = Customer, MER = Merchant, DEL = Delivery Agent, ADM = Administrator). Numerical values are proposed targets for team approval.
+Table 6-A: Security, Privacy, Auditability and Regulatory Compliance
+ID
+ | Category
+ | Requirement
+ | Priority
+ | Source ID
+ | NFR-01
+ | Security – Admin Access
+ | Access to the admin dashboard must be strictly protected through multi-factor authentication and/or secure role-based access control, ensuring only authorized persons can access the administrative dashboard.
+ | High
+ | NFR-ADM-01
+ | NFR-02
+ | Security – Transport
+ | The system shall protect customer credentials, personal information and transaction communications using secure transport protocols.
+ | High
+ | NFR-CUS-05
+ | NFR-03
+ | Security – Encryption
+ | TLS 1.2+ in transit; encrypted storage of ID documents and photos (delivery agent data).
+ | High
+ | NFR-DEL-S-1
+ | NFR-04
+ | Security – Access Control
+ | The system shall ensure that customers can only access their own private profiles, carts, addresses, orders and transaction records.
+ | High
+ | NFR-CUS-06
+ | NFR-05
+ | Security – Data Protection
+ | The system must protect restaurant and customer information from unauthorized access.
+ | High
+ | NFR-MER-01
+ | NFR-06
+ | Security – Passwords
+ | The system shall store passwords using an accepted password-hashing mechanism and shall never store plaintext passwords.
+ | High
+ | NFR-CUS-07
+ | NFR-07
+ | Security – Credentials
+ | Argon2id or bcrypt shall be used for any stored credentials.
+ | High
+ | NFR-DEL-S-4
+ | NFR-08
+ | Security – Input Validation
+ | The system shall validate customer input and protect against common security threats, including injection attacks, cross-site scripting and malformed requests.
+ | High
+ | NFR-CUS-08
+ | NFR-09
+ | Security – Authentication
+ | OTP phone verification at sign-up; token-based sessions thereafter.
+ | High
+ | NFR-DEL-S-2
+ | NFR-10
+ | Security – Biometrics
+ | Biometric authentication for withdrawals, wallet top-ups and high-value COD.
+ | Medium
+ | NFR-DEL-S-3
+ | NFR-11
+ | Auditability – Admin Actions
+ | Every critical administrative action (such as approving a rider, banning a user, issuing a manual refund) must be automatically logged in an uneditable audit table with the Admin ID, timestamp and action details for accountability.
+ | High
+ | NFR-ADM-02
+ | NFR-12
+ | Auditability – Transactions
+ | The system shall retain appropriate records of significant events, including checkout creation, payment outcomes and order cancellations, without exposing internal audit information to customers.
+ | High
+ | NFR-CUS-24
+ | NFR-13
+ | Privacy – Customer Data
+ | The system shall collect and expose only customer information necessary for account operation, order fulfilment, payment processing and customer support.
+ | High
+ | NFR-CUS-23
+ | NFR-14
+ | Privacy – Customer Information
+ | The system must protect customers’ personal information and respect applicable data privacy requirements.
+ | High
+ | NFR-MER-11
+ | NFR-15
+ | Privacy – Location Data
+ | Location data retention shall be limited to operational and dispute-resolution needs.
+ | High
+ | NFR-DEL-S-5
+ | NFR-16
+ | Privacy – Verification Documents
+ | All sensitive uploaded verification documents (ID cards, licences and others) must be stored securely with restricted access permissions, complying with data privacy standards (the applicable standards remain to be determined; see OD-13).
+ | High
+ | NFR-ADM-03
+ | NFR-17
+ | Regulatory Compliance
+ | ANTIC cybersecurity certification and NECAP real-time transaction reporting are legal requirements.
+ | High
+ | NFR-DEL-S-6
+ | Table 6-B: Availability, Reliability, Resilience, Backup and Recovery
+ID
+ | Category
+ | Requirement
+ | Priority
+ | Source ID
+ | NFR-18
+ | Availability – Customer System
+ | The customer-facing system should target at least 99.5% monthly availability, excluding agreed planned maintenance.
+ | Medium
+ | NFR-CUS-04
+ | NFR-19
+ | Availability – Merchant System
+ | The system should be available whenever the restaurant needs to operate.
+ | Medium
+ | NFR-MER-03
+ | NFR-20
+ | Reliability – Orders and Payments
+ | The system should process orders and payments accurately without losing important information.
+ | Medium
+ | NFR-MER-04
+ | NFR-21
+ | Reliability – Crash-Free Sessions
+ | Crash-free session rate of the rider app shall be at least 99.5%.
+ | High
+ | NFR-DEL-R-1
+ | NFR-22
+ | Reliability – Idempotency
+ | Order state idempotency on all mutating endpoints: 100%.
+ | High
+ | NFR-DEL-R-2
+ | NFR-23
+ | Reliability – Offline Queue
+ | Offline queue durability: zero loss of queued actions (100%).
+ | High
+ | NFR-DEL-R-3
+ | NFR-24
+ | Reliability – Offer Delivery
+ | Offer delivery when the rider app is backgrounded or locked: at least 99% within 5 seconds.
+ | High
+ | NFR-DEL-R-4
+ | NFR-25
+ | Reliability – Graceful Degradation
+ | On backend failure the rider app shall enter a degraded mode within 3 seconds with no hard failures.
+ | High
+ | NFR-DEL-R-5
+ | NFR-26
+ | Network Resilience
+ | The customer interface shall handle connectivity loss or slow network conditions without falsely reporting an unconfirmed order or payment as successful.
+ | High
+ | NFR-CUS-21
+ | NFR-27
+ | Notification Reliability
+ | The system should queue and retry eligible customer notifications when temporary delivery failures occur, subject to provider limits and notification policies.
+ | Medium
+ | NFR-CUS-25
+ | NFR-28
+ | Data Backup
+ | The system should regularly back up restaurant data to prevent data loss.
+ | Medium
+ | NFR-MER-08
+ | NFR-29
+ | Backup and Recovery – Customer Data
+ | Customer account, address and order data shall be included in the system’s approved backup and recovery procedures, subject to applicable retention policies.
+ | High
+ | NFR-CUS-22
+ | NFR-30
+ | Recovery
+ | The system should be able to recover important operations and data after a system failure.
+ | Medium
+ | NFR-MER-12
+ | 

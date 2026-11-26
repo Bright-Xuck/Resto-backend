@@ -1,14 +1,18 @@
-import { randomInt, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import argon2 from "argon2";
 import type { PhoneOtp, User } from "../generated/prisma/client.ts";
 import { authRepository } from "../repositories/auth.repository.ts";
+import { decryptSecret, encryptSecret } from "../util/mfaCrypto.ts";
 import {
 	createAccessToken,
+	createMfaToken,
 	createRefreshToken,
 	createSecureToken,
 	hashToken,
-	REFRESH_TOKEN_DAYS,
+	refreshTokenLifetimeMs,
+	verifyMfaToken,
 } from "../util/tokens.ts";
+import { buildTotpUri, createTotpSecret, verifyTotpCode } from "../util/totp.ts";
 
 const OTP_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
@@ -36,7 +40,19 @@ export type Session = {
 	user: PublicUser;
 	accessToken: string;
 	refreshToken: string;
+	refreshMaxAgeMs: number;
 };
+
+// Admins must confirm a second factor before they receive a session.
+export type AdminMfaChallenge = {
+	ok: true;
+	mfaRequired: true;
+	mfaSetupRequired: boolean;
+	mfaToken: string;
+};
+
+// Login either creates a session or asks the admin for an authenticator code.
+export type LoginResult = Session | AdminMfaChallenge;
 
 type RegisterInput = {
 	fullName: string;
@@ -334,7 +350,7 @@ export async function registerRider(
 export async function login(
 	input: LoginInput,
 	deviceId: string | null = null,
-): Promise<Session | Failure> {
+): Promise<LoginResult | Failure> {
 	let user: User | null = null;
 
 	if (input.email) {
@@ -395,6 +411,26 @@ export async function login(
 
 	await authRepository.resetFailedLogin(user.id);
 
+	// Admins get a challenge token instead of a session until a second factor is confirmed.
+	if (user.type === "ADMIN") {
+		if (!user.adminRole) {
+			return {
+				ok: false,
+				status: 403,
+				message: "This admin account has no role assigned. Contact a super admin.",
+			};
+		}
+
+		const mfa = await authRepository.findAdminMfa(user.id);
+
+		return {
+			ok: true,
+			mfaRequired: true,
+			mfaSetupRequired: !mfa?.enabledAt,
+			mfaToken: createMfaToken(user.id),
+		};
+	}
+
 	return issueSession(user, deviceId);
 }
 
@@ -402,7 +438,13 @@ export async function login(
 export async function refresh(
 	refreshToken: string,
 ): Promise<
-	{ ok: true; userId: string; accessToken: string; refreshToken: string } | Failure
+	{
+		ok: true;
+		userId: string;
+		accessToken: string;
+		refreshToken: string;
+		refreshMaxAgeMs: number;
+	} | Failure
 > {
 	const record = await authRepository.findRefreshToken(hashToken(refreshToken));
 
@@ -451,13 +493,14 @@ export async function refresh(
 	}
 
 	const next = createRefreshToken();
+	const refreshMaxAgeMs = refreshTokenLifetimeMs(record.user.type);
 	const rotated = await authRepository.rotateRefreshToken(record.id, {
 		id: randomUUID(),
 		userId: record.userId,
 		familyId: record.familyId,
 		tokenHash: next.hash,
 		deviceId: record.deviceId,
-		expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
+		expiresAt: new Date(Date.now() + refreshMaxAgeMs),
 	});
 
 	if (!rotated) {
@@ -475,6 +518,7 @@ export async function refresh(
 		userId: record.userId,
 		accessToken: createAccessToken(record.user),
 		refreshToken: next.token,
+		refreshMaxAgeMs,
 	};
 }
 
@@ -656,9 +700,312 @@ export async function verifyPhoneChange(
 	};
 }
 
+// Checks the short-lived MFA token and loads the admin it belongs to.
+async function adminFromMfaToken(
+	mfaToken: string,
+): Promise<{ ok: true; user: User } | Failure> {
+	let userId: string;
+
+	try {
+		userId = verifyMfaToken(mfaToken);
+	} catch {
+		return {
+			ok: false,
+			status: 401,
+			message: "This confirmation token is invalid or has expired. Please log in again.",
+		};
+	}
+
+	const user = await authRepository.findUserById(userId);
+
+	if (!user || user.type !== "ADMIN" || !user.adminRole || user.status !== "ACTIVE") {
+		return {
+			ok: false,
+			status: 401,
+			message: "This admin account is not available.",
+		};
+	}
+
+	return { ok: true, user };
+}
+
+// Turns a stored encrypted secret back into the base32 value, or null if unreadable.
+function readTotpSecret(secretEncrypted: string): string | null {
+	try {
+		return decryptSecret(secretEncrypted);
+	} catch {
+		return null;
+	}
+}
+
+// Recovery codes are shown once and only their hashes are stored.
+async function storeNewRecoveryCodes(userId: string): Promise<string[]> {
+	const codes = Array.from({ length: 8 }, () => {
+		const raw = randomBytes(5).toString("hex").toUpperCase();
+
+		return `${raw.slice(0, 5)}-${raw.slice(5)}`;
+	});
+
+	await authRepository.replaceAdminRecoveryCodes(
+		userId,
+		codes.map((code) => ({ id: randomUUID(), codeHash: hashToken(code) })),
+	);
+
+	return codes;
+}
+
+// Accepts a recovery code typed with or without its hyphen.
+function normalizeRecoveryCode(code: string): string {
+	const trimmed = code.trim().toUpperCase();
+
+	if (/^[A-F0-9]{10}$/.test(trimmed)) {
+		return `${trimmed.slice(0, 5)}-${trimmed.slice(5)}`;
+	}
+
+	return trimmed;
+}
+
+// Starts MFA enrolment and stores the pending secret.
+export async function setupAdminMfa(
+	mfaToken: string,
+): Promise<{ ok: true; secret: string; otpauthUri: string } | Failure> {
+	const found = await adminFromMfaToken(mfaToken);
+
+	if (!found.ok) {
+		return found;
+	}
+
+	const existing = await authRepository.findAdminMfa(found.user.id);
+
+	if (existing?.enabledAt) {
+		return {
+			ok: false,
+			status: 409,
+			message: "Two-factor authentication is already enabled.",
+		};
+	}
+
+	const secret = createTotpSecret();
+	await authRepository.upsertAdminMfa(found.user.id, encryptSecret(secret));
+
+	return {
+		ok: true,
+		secret,
+		otpauthUri: buildTotpUri(found.user.email ?? found.user.id, secret),
+	};
+}
+
+// Confirms the first code, enables MFA and returns recovery codes plus a session.
+export async function enableAdminMfa(
+	mfaToken: string,
+	code: string,
+	deviceId: string | null = null,
+): Promise<(Session & { recoveryCodes: string[] }) | Failure> {
+	const found = await adminFromMfaToken(mfaToken);
+
+	if (!found.ok) {
+		return found;
+	}
+
+	const record = await authRepository.findAdminMfa(found.user.id);
+
+	if (!record) {
+		return {
+			ok: false,
+			status: 400,
+			message: "Start the two-factor setup step first.",
+		};
+	}
+
+	if (record.enabledAt) {
+		return {
+			ok: false,
+			status: 409,
+			message: "Two-factor authentication is already enabled.",
+		};
+	}
+
+	const secret = readTotpSecret(record.secretEncrypted);
+
+	if (!secret) {
+		return {
+			ok: false,
+			status: 400,
+			message: "The setup secret could not be read. Start the setup step again.",
+		};
+	}
+
+	if (!verifyTotpCode(secret, code)) {
+		return {
+			ok: false,
+			status: 401,
+			message: "That authenticator code is incorrect.",
+		};
+	}
+
+	await authRepository.enableAdminMfa(found.user.id);
+	const recoveryCodes = await storeNewRecoveryCodes(found.user.id);
+	const session = await issueSession(found.user, deviceId);
+
+	return { ...session, recoveryCodes };
+}
+
+// Completes an admin login with a TOTP code or a one-time recovery code.
+export async function verifyAdminMfaLogin(
+	mfaToken: string,
+	code: string,
+	deviceId: string | null = null,
+): Promise<Session | Failure> {
+	const found = await adminFromMfaToken(mfaToken);
+
+	if (!found.ok) {
+		return found;
+	}
+
+	const record = await authRepository.findAdminMfa(found.user.id);
+
+	if (!record?.enabledAt) {
+		return {
+			ok: false,
+			status: 400,
+			message: "Two-factor authentication is not set up for this account.",
+		};
+	}
+
+	const secret = readTotpSecret(record.secretEncrypted);
+
+	if (!secret) {
+		return {
+			ok: false,
+			status: 400,
+			message: "The stored secret could not be read. Contact a super admin.",
+		};
+	}
+
+	let valid = verifyTotpCode(secret, code);
+
+	// A recovery code also works, but only once.
+	if (!valid) {
+		const recovery = await authRepository.findUnusedRecoveryCode(
+			hashToken(normalizeRecoveryCode(code)),
+		);
+
+		if (recovery) {
+			await authRepository.useRecoveryCode(recovery.id);
+			valid = true;
+		}
+	}
+
+	if (!valid) {
+		return {
+			ok: false,
+			status: 401,
+			message: "That authenticator code is incorrect.",
+		};
+	}
+
+	return issueSession(found.user, deviceId);
+}
+
+// Turns MFA off after checking the password and a current code.
+export async function disableAdminMfa(
+	userId: string,
+	password: string,
+	code: string,
+): Promise<{ ok: true; message: string } | Failure> {
+	const user = await authRepository.findUserById(userId);
+
+	if (!user || user.type !== "ADMIN") {
+		return {
+			ok: false,
+			status: 401,
+			message: "This admin account is not available.",
+		};
+	}
+
+	const passwordMatches = await argon2.verify(user.passwordHash, password);
+
+	if (!passwordMatches) {
+		return {
+			ok: false,
+			status: 401,
+			message: "Your password is incorrect.",
+		};
+	}
+
+	const record = await authRepository.findAdminMfa(userId);
+
+	if (!record?.enabledAt) {
+		return {
+			ok: false,
+			status: 400,
+			message: "Two-factor authentication is not enabled.",
+		};
+	}
+
+	const secret = readTotpSecret(record.secretEncrypted);
+
+	if (!secret || !verifyTotpCode(secret, code)) {
+		return {
+			ok: false,
+			status: 401,
+			message: "That authenticator code is incorrect.",
+		};
+	}
+
+	await authRepository.deleteAdminMfa(userId);
+
+	return {
+		ok: true,
+		message: "Two-factor authentication has been turned off.",
+	};
+}
+
+// Confirms a fresh TOTP code and returns an access token marked as stepped up.
+export async function stepUpAdmin(
+	userId: string,
+	code: string,
+): Promise<{ ok: true; accessToken: string } | Failure> {
+	const user = await authRepository.findUserById(userId);
+
+	if (!user || user.type !== "ADMIN" || !user.adminRole) {
+		return {
+			ok: false,
+			status: 401,
+			message: "This admin account is not available.",
+		};
+	}
+
+	const record = await authRepository.findAdminMfa(userId);
+
+	if (!record?.enabledAt) {
+		return {
+			ok: false,
+			status: 400,
+			message: "Set up two-factor authentication first.",
+		};
+	}
+
+	const secret = readTotpSecret(record.secretEncrypted);
+
+	if (!secret || !verifyTotpCode(secret, code)) {
+		return {
+			ok: false,
+			status: 401,
+			message: "That authenticator code is incorrect.",
+		};
+	}
+
+	return {
+		ok: true,
+		accessToken: createAccessToken(user, { stepUp: true }),
+	};
+}
+
 // Stores a hashed refresh token and builds the full login session.
 async function issueSession(user: User, deviceId: string | null): Promise<Session> {
 	const refreshToken = createRefreshToken();
+	const refreshMaxAgeMs = refreshTokenLifetimeMs(user.type);
 
 	await authRepository.createRefreshToken({
 		id: randomUUID(),
@@ -666,7 +1013,7 @@ async function issueSession(user: User, deviceId: string | null): Promise<Sessio
 		familyId: randomUUID(),
 		tokenHash: refreshToken.hash,
 		deviceId,
-		expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
+		expiresAt: new Date(Date.now() + refreshMaxAgeMs),
 	});
 
 	return {
@@ -674,6 +1021,7 @@ async function issueSession(user: User, deviceId: string | null): Promise<Sessio
 		user: toPublicUser(user),
 		accessToken: createAccessToken(user),
 		refreshToken: refreshToken.token,
+		refreshMaxAgeMs,
 	};
 }
 

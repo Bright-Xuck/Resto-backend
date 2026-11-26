@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { recordAudit } from "../services/audit.service.ts";
 import {
+	disableAdminMfa,
+	enableAdminMfa,
 	forgotPassword,
 	getMe as getMeService,
 	login,
@@ -12,10 +14,17 @@ import {
 	requestPhoneChange,
 	requestRiderOtp,
 	resetPassword,
+	setupAdminMfa,
+	stepUpAdmin,
+	verifyAdminMfaLogin,
 	verifyPhoneChange,
 } from "../services/auth.service.ts";
-import { REFRESH_TOKEN_DAYS } from "../util/tokens.ts";
 import {
+	adminMfaDisableSchema,
+	adminMfaEnableSchema,
+	adminMfaSetupSchema,
+	adminMfaVerifySchema,
+	adminStepUpSchema,
 	forgotPasswordSchema,
 	loginSchema,
 	phoneChangeRequestSchema,
@@ -68,7 +77,7 @@ export async function registerUser(req: Request, res: Response) {
 		// Keep the refresh token out of JavaScript and send it as an HttpOnly cookie.
 		res.cookie(REFRESH_COOKIE, session.refreshToken, {
 			...REFRESH_COOKIE_OPTIONS,
-			maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+			maxAge: session.refreshMaxAgeMs,
 		});
 
 		res.status(201).json({
@@ -130,7 +139,7 @@ export async function registerRiderUser(req: Request, res: Response) {
 		// Rider accounts receive the same HttpOnly refresh cookie as other users.
 		res.cookie(REFRESH_COOKIE, session.refreshToken, {
 			...REFRESH_COOKIE_OPTIONS,
-			maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+			maxAge: session.refreshMaxAgeMs,
 		});
 
 		res.status(201).json({
@@ -166,12 +175,29 @@ export async function loginUser(req: Request, res: Response) {
 			return;
 		}
 
+		// Admin logins stop here until an authenticator code is confirmed.
+		if ("mfaRequired" in session) {
+			await recordAudit(
+				req,
+				"LOGIN_MFA_REQUIRED",
+				undefined,
+				result.data.email ?? result.data.phone,
+			);
+
+			res.status(200).json({
+				mfaRequired: true,
+				mfaSetupRequired: session.mfaSetupRequired,
+				mfaToken: session.mfaToken,
+			});
+			return;
+		}
+
 		await recordAudit(req, "LOGIN", session.user.id);
 
 		// A new login always gets a fresh HttpOnly refresh cookie.
 		res.cookie(REFRESH_COOKIE, session.refreshToken, {
 			...REFRESH_COOKIE_OPTIONS,
-			maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+			maxAge: session.refreshMaxAgeMs,
 		});
 
 		res.status(200).json({
@@ -206,7 +232,7 @@ export async function refreshSession(req: Request, res: Response) {
 		// Rotation replaces the old cookie with the new refresh token.
 		res.cookie(REFRESH_COOKIE, response.refreshToken, {
 			...REFRESH_COOKIE_OPTIONS,
-			maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+			maxAge: response.refreshMaxAgeMs,
 		});
 
 		res.status(200).json({ accessToken: response.accessToken });
@@ -384,5 +410,174 @@ export async function getMe(req: Request, res: Response) {
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "We could not load your profile. Please try again." });
+	}
+}
+
+// POST /api/auth/admin/mfa/setup - starts two-factor enrolment for an admin.
+export async function setupAdminMfaCode(req: Request, res: Response) {
+	const result = adminMfaSetupSchema.safeParse(req.body);
+
+	if (!result.success) {
+		res.status(400).json({ message: result.error.issues[0]?.message });
+		return;
+	}
+
+	try {
+		const response = await setupAdminMfa(result.data.mfaToken);
+
+		if (!response.ok) {
+			res.status(response.status).json({ message: response.message });
+			return;
+		}
+
+		res.status(200).json({
+			secret: response.secret,
+			otpauthUri: response.otpauthUri,
+			message: "Add this secret to your authenticator app, then confirm a code.",
+		});
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "We could not start two-factor setup. Please try again." });
+	}
+}
+
+// POST /api/auth/admin/mfa/enable - confirms the first code and starts the session.
+export async function enableAdminMfaCode(req: Request, res: Response) {
+	const result = adminMfaEnableSchema.safeParse(req.body);
+
+	if (!result.success) {
+		res.status(400).json({ message: result.error.issues[0]?.message });
+		return;
+	}
+
+	try {
+		const session = await enableAdminMfa(
+			result.data.mfaToken,
+			result.data.code,
+			getDeviceId(req),
+		);
+
+		if (!session.ok) {
+			res.status(session.status).json({ message: session.message });
+			return;
+		}
+
+		await recordAudit(req, "ADMIN_MFA_ENABLED", session.user.id);
+
+		res.cookie(REFRESH_COOKIE, session.refreshToken, {
+			...REFRESH_COOKIE_OPTIONS,
+			maxAge: session.refreshMaxAgeMs,
+		});
+
+		res.status(200).json({
+			user: session.user,
+			accessToken: session.accessToken,
+			recoveryCodes: session.recoveryCodes,
+		});
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "We could not enable two-factor authentication. Please try again." });
+	}
+}
+
+// POST /api/auth/admin/mfa/verify - completes an admin login.
+export async function verifyAdminMfaCode(req: Request, res: Response) {
+	const result = adminMfaVerifySchema.safeParse(req.body);
+
+	if (!result.success) {
+		res.status(400).json({ message: result.error.issues[0]?.message });
+		return;
+	}
+
+	try {
+		const session = await verifyAdminMfaLogin(
+			result.data.mfaToken,
+			result.data.code,
+			getDeviceId(req),
+		);
+
+		if (!session.ok) {
+			res.status(session.status).json({ message: session.message });
+			return;
+		}
+
+		await recordAudit(req, "ADMIN_LOGIN", session.user.id);
+
+		res.cookie(REFRESH_COOKIE, session.refreshToken, {
+			...REFRESH_COOKIE_OPTIONS,
+			maxAge: session.refreshMaxAgeMs,
+		});
+
+		res.status(200).json({
+			user: session.user,
+			accessToken: session.accessToken,
+		});
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "We could not confirm your code. Please try again." });
+	}
+}
+
+// POST /api/auth/admin/mfa/disable - turns two-factor authentication off.
+export async function disableAdminMfaCode(req: Request, res: Response) {
+	const result = adminMfaDisableSchema.safeParse(req.body);
+
+	if (!result.success) {
+		res.status(400).json({ message: result.error.issues[0]?.message });
+		return;
+	}
+
+	if (!req.user) {
+		res.status(401).json({ message: "You must be logged in as an admin." });
+		return;
+	}
+
+	try {
+		const response = await disableAdminMfa(
+			req.user.sub,
+			result.data.password,
+			result.data.code,
+		);
+
+		if (!response.ok) {
+			res.status(response.status).json({ message: response.message });
+			return;
+		}
+
+		await recordAudit(req, "ADMIN_MFA_DISABLED", req.user.sub);
+		res.status(200).json({ message: response.message });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "We could not turn off two-factor authentication. Please try again." });
+	}
+}
+
+// POST /api/auth/admin/step-up - returns a fresh access token after a code check.
+export async function stepUpAdminSession(req: Request, res: Response) {
+	const result = adminStepUpSchema.safeParse(req.body);
+
+	if (!result.success) {
+		res.status(400).json({ message: result.error.issues[0]?.message });
+		return;
+	}
+
+	if (!req.user) {
+		res.status(401).json({ message: "You must be logged in as an admin." });
+		return;
+	}
+
+	try {
+		const response = await stepUpAdmin(req.user.sub, result.data.code);
+
+		if (!response.ok) {
+			res.status(response.status).json({ message: response.message });
+			return;
+		}
+
+		await recordAudit(req, "ADMIN_STEP_UP", req.user.sub);
+		res.status(200).json({ accessToken: response.accessToken });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "We could not confirm your code. Please try again." });
 	}
 }
