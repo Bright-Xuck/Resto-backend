@@ -32,6 +32,11 @@ app.get("/health", (req, res) => {
 	res.json({ ok: "ok", message: "The server is running" });
 });
 
+//swagger json
+app.get("/docs.json", (req, res)=>{
+	res.json(openapi)
+})
+
 // All authentication endpoints.
 app.use("/api/auth", authRoutes);
 
